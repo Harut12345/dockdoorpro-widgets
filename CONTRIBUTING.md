@@ -138,17 +138,9 @@ struct MyWidgetView: View {
 }
 ```
 
-### Sizing constants
+### Sizing
 
-Use `WidgetMetrics` so your widget matches the built-in ones:
-
-| Constant | Value | What it's for |
-|----------|-------|---------------|
-| `contentScale` | 0.85 | main icon/image size relative to `dim` |
-| `sfSymbolScale` | 0.55 | SF Symbol size relative to `dim` |
-| `spacingScale` | 0.08 | spacing between elements relative to `dim` |
-
-The host computes the actual content area from the slot config (single = `iconSize`, double = `iconSize * 2 + 4`, minus card padding). You just use what you're given.
+All sizing should be proportional to the shortest side of the content area. The view example above defines `dim` as `min(size.width, size.height)` and uses `WidgetMetrics` constants (`contentScale`, `sfSymbolScale`, `spacingScale`) to stay consistent with built-in widgets. See `StorageMonitorView.swift` for a full example.
 
 ## 5. Settings (optional)
 
