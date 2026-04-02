@@ -39,6 +39,7 @@ Widgets/
     "author": "your-github-username",
     "description": "Short description of what it does",
     "iconSymbol": "star",
+    "orientations": ["horizontal"],
     "principalClass": "MyWidgetPlugin",
     "sources": ["MyWidgetPlugin.swift", "MyWidgetView.swift"]
 }
@@ -47,6 +48,7 @@ Widgets/
 - **id** - must be globally unique across all widgets. This is how the app identifies your widget for updates. Pick something descriptive like `"storage-monitor"` or `"cpu-usage"`
 - **name** - display name shown in the marketplace
 - **iconSymbol** - any [SF Symbol](https://developer.apple.com/sf-symbols/) name
+- **orientations** - which dock orientations your widget supports: `"horizontal"` (bottom/top dock), `"vertical"` (left/right dock), or both. **You must list at least one.** For each orientation you declare, you must handle both compact (single-slot) and extended (double-slot) layouts. Widgets missing this field will not appear in the marketplace.
 - **principalClass** - must match your plugin class name exactly
 - **sources** - all your `.swift` files, order doesn't matter
 
@@ -63,6 +65,7 @@ final class MyWidgetPlugin: WidgetPlugin, DockDoorWidgetProvider {
     var name: String { "My Widget" }
     var iconSymbol: String { "star" }
     var widgetDescription: String { "Short description" }
+    var supportedOrientations: [WidgetOrientation] { [.horizontal] }
 
     @MainActor
     func makeBody(size: CGSize, isVertical: Bool) -> AnyView {
@@ -78,7 +81,7 @@ Your view gets two things from the host app:
 - **`size`** - the content area you can draw in. **Don't apply `.frame()` yourself**, the host handles that.
 - **`isVertical`** - `true` when the dock is on the left or right side of the screen.
 
-You need to handle both **compact** (single slot) and **extended** (double slot) layouts, and all 4 dock positions.
+For each orientation you declared in `widget.json`, you must handle both **compact** (single slot) and **extended** (double slot) layouts. If you only declared `"horizontal"`, you only need to handle horizontal layouts — but both sizes.
 
 ```swift
 struct MyWidgetView: View {
@@ -165,6 +168,28 @@ let showPercentage = WidgetDefaults.bool(key: "showPercentage", widgetId: id)
 let threshold = WidgetDefaults.double(key: "warningThreshold", widgetId: id, default: 75)
 let ringStyle = WidgetDefaults.string(key: "ringStyle", widgetId: id, default: "Rounded")
 ```
+
+## 6. Panel (optional)
+
+If your widget needs a richer interaction (details view, controls, etc.), you can provide panel content that appears on long-press, right-click, or hover-activate. The host handles all presentation.
+
+```swift
+@MainActor
+func makePanelBody(dismiss: @escaping () -> Void) -> AnyView? {
+    AnyView(
+        VStack(spacing: 12) {
+            Text("Detailed View")
+                .font(.headline)
+            Button("Done") { dismiss() }
+        }
+        .padding()
+    )
+}
+```
+
+- Return `nil` (the default) if your widget has no panel — nothing changes.
+- The `dismiss` closure closes the panel. Call it from buttons, after an action completes, etc.
+- Don't worry about positioning or chrome — the host handles that.
 
 ## What you can't do
 

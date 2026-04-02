@@ -24,6 +24,29 @@ jobs:
           done
           echo "Folder names valid"
 
+      - name: Validate orientations field
+        run: |
+          VALID_VALUES='["horizontal","vertical"]'
+          FAILED=0
+          for dir in Widgets/*/; do
+            json="$dir/widget.json"
+            [ -f "$json" ] || continue
+            orientations=$(python3 -c "import json,sys; d=json.load(open(sys.argv[1])); print(json.dumps(sorted(d.get('orientations',[]))))" "$json")
+            if [ "$orientations" = "[]" ]; then
+              echo "::error file=$json::Missing or empty 'orientations' field. Must contain at least one of: horizontal, vertical"
+              FAILED=1
+              continue
+            fi
+            for val in $(python3 -c "import json,sys; d=json.load(open(sys.argv[1])); [print(v) for v in d.get('orientations',[])]" "$json"); do
+              if [ "$val" != "horizontal" ] && [ "$val" != "vertical" ]; then
+                echo "::error file=$json::Invalid orientation '$val'. Must be 'horizontal' or 'vertical'"
+                FAILED=1
+              fi
+            done
+          done
+          if [ "$FAILED" -eq 1 ]; then exit 1; fi
+          echo "Orientations valid"
+
       - name: Lint for unsafe APIs
         run: |
           UNSAFE_PATTERNS="Process\(|NSTask|dlopen|dlsym|system\(|popen\("

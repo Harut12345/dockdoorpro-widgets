@@ -4,6 +4,7 @@
     "author": "example",
     "description": "Shows available disk space with a usage ring",
     "iconSymbol": "internaldrive",
+    "orientations": ["horizontal", "vertical"],
     "principalClass": "StorageMonitorPlugin",
-    "sources": ["StorageMonitorPlugin.swift", "StorageMonitorView.swift"]
+    "sources": ["StorageMonitorPlugin.swift", "StorageMonitorView.swift", "StorageMonitorPanelView.swift"]
 }

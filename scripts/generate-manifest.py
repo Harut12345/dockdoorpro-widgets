@@ -34,12 +34,18 @@ def main():
         bundle_name = widget_dir.name + ".bundle"
         bundle_zip = build_dir / (bundle_name + ".zip")
 
+        orientations = meta.get("orientations")
+        if not orientations:
+            print(f"  Skipping {widget_dir.name}: missing 'orientations' field")
+            continue
+
         entry = {
             "id": meta["id"],
             "name": meta["name"],
             "author": meta.get("author", "unknown"),
             "description": meta.get("description", ""),
             "iconSymbol": meta.get("iconSymbol", "puzzlepiece"),
+            "orientations": orientations,
             "bundleFilename": bundle_name + ".zip",
         }
 

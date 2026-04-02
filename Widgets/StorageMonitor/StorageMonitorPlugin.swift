@@ -6,6 +6,7 @@ final class StorageMonitorPlugin: WidgetPlugin, DockDoorWidgetProvider {
     var name: String { "Storage" }
     var iconSymbol: String { "internaldrive" }
     var widgetDescription: String { "Shows available disk space" }
+    var supportedOrientations: [WidgetOrientation] { [.horizontal, .vertical] }
 
     func settingsSchema() -> [WidgetSetting] {
         [
@@ -18,5 +19,10 @@ final class StorageMonitorPlugin: WidgetPlugin, DockDoorWidgetProvider {
     @MainActor
     func makeBody(size: CGSize, isVertical: Bool) -> AnyView {
         AnyView(StorageMonitorView(size: size, isVertical: isVertical, widgetId: id))
+    }
+
+    @MainActor
+    func makePanelBody(dismiss: @escaping () -> Void) -> AnyView? {
+        AnyView(StorageMonitorPanelView(widgetId: id, dismiss: dismiss))
     }
 }
