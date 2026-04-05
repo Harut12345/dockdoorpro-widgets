@@ -56,7 +56,7 @@ struct StorageMonitorPanelView: View {
     private func refresh() {
         let fm = FileManager.default
         guard let urls = fm.mountedVolumeURLs(
-            includingResourceValuesForKeys: [.volumeTotalCapacityKey, .volumeAvailableCapacityForImportantUsageKey, .volumeLocalizedNameKey],
+            includingResourceValuesForKeys: [.volumeTotalCapacityKey, .volumeAvailableCapacityForImportantUsageKey, .volumeAvailableCapacityKey, .volumeLocalizedNameKey],
             options: [.skipHiddenVolumes]
         ) else { return }
 
@@ -64,11 +64,12 @@ struct StorageMonitorPanelView: View {
             guard let values = try? url.resourceValues(forKeys: [
                 .volumeTotalCapacityKey,
                 .volumeAvailableCapacityForImportantUsageKey,
+                .volumeAvailableCapacityKey,
                 .volumeLocalizedNameKey,
             ]) else { return nil }
 
             guard let total = values.volumeTotalCapacity, total > 0 else { return nil }
-            let free = values.volumeAvailableCapacityForImportantUsage ?? 0
+            let free = values.volumeAvailableCapacityForImportantUsage ?? Int64(values.volumeAvailableCapacity ?? 0)
             let name = values.volumeLocalizedName ?? url.lastPathComponent
 
             return VolumeInfo(
