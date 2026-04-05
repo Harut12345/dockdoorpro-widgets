@@ -56,25 +56,30 @@ struct StorageMonitorPanelView: View {
     private func refresh() {
         let fm = FileManager.default
         guard let urls = fm.mountedVolumeURLs(
-            includingResourceValuesForKeys: [.volumeTotalCapacityKey, .volumeAvailableCapacityForImportantUsageKey, .volumeAvailableCapacityKey, .volumeLocalizedNameKey],
+            includingResourceValuesForKeys: [.volumeLocalizedNameKey],
             options: [.skipHiddenVolumes]
         ) else { return }
 
         volumes = urls.compactMap { url -> VolumeInfo? in
-            guard let values = try? url.resourceValues(forKeys: [
-                .volumeTotalCapacityKey,
-                .volumeAvailableCapacityForImportantUsageKey,
-                .volumeAvailableCapacityKey,
-                .volumeLocalizedNameKey,
-            ]) else { return nil }
+            let name: String
+            if let values = try? url.resourceValues(forKeys: [.volumeLocalizedNameKey]),
+               let localized = values.volumeLocalizedName
+            {
+                name = localized
+            } else {
+                name = url.lastPathComponent
+            }
 
-            guard let total = values.volumeTotalCapacity, total > 0 else { return nil }
-            let free = values.volumeAvailableCapacityForImportantUsage ?? Int64(values.volumeAvailableCapacity ?? 0)
-            let name = values.volumeLocalizedName ?? url.lastPathComponent
+            // attributesOfFileSystem uses statfs which works across all filesystem types
+            guard let attrs = try? fm.attributesOfFileSystem(forPath: url.path),
+                  let total = attrs[.systemSize] as? Int64, total > 0
+            else { return nil }
+
+            let free = attrs[.systemFreeSize] as? Int64 ?? 0
 
             return VolumeInfo(
                 name: name,
-                totalBytes: Int64(total),
+                totalBytes: total,
                 freeBytes: free
             )
         }
