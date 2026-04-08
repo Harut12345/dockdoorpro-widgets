@@ -1,0 +1,10 @@
+{
+    "id": "clipboard-history",
+    "name": "Clipboard",
+    "author": "votre-nom-github",
+    "description": "Quick access to clipboard history with live preview. Pin, copy, paste and delete entries.",
+    "iconSymbol": "clipboard.fill",
+    "orientations": ["horizontal", "vertical"],
+    "principalClass": "ClipboardPlugin",
+    "sources": ["ClipboardPlugin.swift", "ClipboardMonitor.swift", "ClipboardPanel.swift", "ClipboardWidgetView.swift", "ClipboardStrings.swift"]
+}
