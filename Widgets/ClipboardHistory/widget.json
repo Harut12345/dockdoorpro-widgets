@@ -1,8 +1,8 @@
 {
     "id": "clipboard-history",
     "name": "Clipboard",
-    "author": "votre-nom-github",
-    "description": "Quick access to clipboard history with live preview. Pin, copy, paste and delete entries.",
+    "author": "Harut and Claude AI",
+    "description": "Quick access to clipboard history with live preview. Pin, copy, paste, multi-paste and color picker.",
     "iconSymbol": "clipboard.fill",
     "orientations": ["horizontal", "vertical"],
     "principalClass": "ClipboardPlugin",

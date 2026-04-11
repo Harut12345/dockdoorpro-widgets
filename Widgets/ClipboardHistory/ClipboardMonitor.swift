@@ -1,87 +1,87 @@
 import AppKit
 import SwiftUI
 
-enum ContenuPressePapier {
-    case texte(String)
+enum ClipboardContent {
+    case text(String)
     case image(NSImage)
-    case urlFichier(URL)
-    case inconnu
+    case fileURL(URL)
+    case unknown
 }
 
-/// Sous-catégorie détectée pour les éléments texte.
-/// Tous ont la couleur bleue, seuls l'icône et le label changent.
-enum SousTypeTexte {
+/// Detected sub-category for text items.
+/// All share the blue color; only the icon and label differ.
+enum TextSubtype {
     case email
-    case telephone
+    case phone
     case date
     case code
     case url
-    case texte   // fallback générique
+    case text   // generic fallback
 }
 
-extension SousTypeTexte {
-    var icone: String {
+extension TextSubtype {
+    var icon: String {
         switch self {
-        case .email:     return "envelope"
-        case .telephone: return "phone"
-        case .date:      return "calendar"
-        case .code:      return "chevron.left.forwardslash.chevron.right"
-        case .url:       return "globe.americas.fill"
-        case .texte:     return "doc.plaintext"
+        case .email:  return "envelope"
+        case .phone:  return "phone"
+        case .date:   return "calendar"
+        case .code:   return "chevron.left.forwardslash.chevron.right"
+        case .url:    return "globe.americas.fill"
+        case .text:   return "doc.plaintext"
         }
     }
 
     var label: String {
         switch self {
-        case .email:     return "Email"
-        case .telephone: return "Phone"
-        case .date:      return "Date"
-        case .code:      return "Code"
-        case .url:       return "Link"
-        case .texte:     return "Text"
+        case .email:  return "Email"
+        case .phone:  return "Phone"
+        case .date:   return "Date"
+        case .code:   return "Code"
+        case .url:    return "Link"
+        case .text:   return "Text"
         }
     }
 }
 
-struct ElementPressePapier: Identifiable {
+struct ClipboardItem: Identifiable {
     let id = UUID()
-    let contenu: ContenuPressePapier
+    let content: ClipboardContent
     let source: String
     let date: Date
-    var estEpingle: Bool = false
+    var isPinned: Bool = false
 
-    // OPTIMISATION 9 : résultats de détection mis en cache à la création
-    // évite de relancer les regex à chaque re-render de la vue
-    let couleurCachee: Color?
-    /// Sous-type détecté pour les éléments texte (email, téléphone, date, code, url, texte)
-    let sousTypeCache: SousTypeTexte?
+    // OPTIMISATION 9: detection results cached at creation time
+    // avoids re-running regex on every view re-render
+    let cachedColor: Color?
+    /// Detected subtype for text items (email, phone, date, code, url, text)
+    let cachedSubtype: TextSubtype?
 
-    init(contenu: ContenuPressePapier, source: String, date: Date, estEpingle: Bool = false) {
-        self.contenu     = contenu
-        self.source      = source
-        self.date        = date
-        self.estEpingle  = estEpingle
-        // Calcul unique au moment de la création de l'élément
-        if case .texte(let t) = contenu {
-            self.couleurCachee = ElementPressePapier.detecterCouleurStatique(dans: t)
-            self.sousTypeCache = ElementPressePapier.detecterSousType(dans: t)
+    init(content: ClipboardContent, source: String, date: Date, isPinned: Bool = false) {
+        self.content  = content
+        self.source   = source
+        self.date     = date
+        self.isPinned = isPinned
+        // Computed once at item creation
+        if case .text(let t) = content {
+            self.cachedColor   = ClipboardItem.detectColorStatic(in: t)
+            self.cachedSubtype = ClipboardItem.detectSubtype(in: t)
         } else {
-            self.couleurCachee = nil
-            self.sousTypeCache = nil
+            self.cachedColor   = nil
+            self.cachedSubtype = nil
         }
     }
 
-    // Regex compilées une seule fois (partagées avec ClipboardPanel via accès statique)
+    // Regex compiled once (shared with ClipboardPanel via static access)
     private static let regexHex = try! NSRegularExpression(pattern: "^#([0-9A-Fa-f]{6}|[0-9A-Fa-f]{3})$")
     private static let regexRGB = try! NSRegularExpression(pattern: "^rgb\\(\\s*(\\d{1,3})\\s*,\\s*(\\d{1,3})\\s*,\\s*(\\d{1,3})\\s*\\)$", options: .caseInsensitive)
     private static let regexHSL = try! NSRegularExpression(pattern: "^hsl\\(\\s*(\\d{1,3})\\s*,\\s*(\\d{1,3})%\\s*,\\s*(\\d{1,3})%\\s*\\)$", options: .caseInsensitive)
 
-    static func detecterCouleurStatique(dans texte: String) -> Color? {
-        let t = texte.trimmingCharacters(in: .whitespacesAndNewlines)
-        let range = NSRange(t.startIndex..., in: t)
+    static func detectColorStatic(in text: String) -> Color? {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        let range = NSRange(trimmed.startIndex..., in: trimmed)
 
-        if regexHex.firstMatch(in: t, range: range) != nil {
-            var hex = t.dropFirst()
+        if regexHex.firstMatch(in: trimmed, range: range) != nil {
+            var hex = trimmed.dropFirst()
             if hex.count == 3 { hex = Substring(hex.map { "\($0)\($0)" }.joined()) }
             let scanner = Scanner(string: String(hex))
             var rgb: UInt64 = 0
@@ -93,15 +93,15 @@ struct ElementPressePapier: Identifiable {
             )
         }
 
-        if regexRGB.firstMatch(in: t, range: range) != nil {
-            let nums = t.components(separatedBy: CharacterSet.decimalDigits.inverted).compactMap(Int.init)
+        if regexRGB.firstMatch(in: trimmed, range: range) != nil {
+            let nums = trimmed.components(separatedBy: CharacterSet.decimalDigits.inverted).compactMap(Int.init)
             if nums.count >= 3 {
                 return Color(red: Double(nums[0])/255, green: Double(nums[1])/255, blue: Double(nums[2])/255)
             }
         }
 
-        if regexHSL.firstMatch(in: t, range: range) != nil {
-            let nums = t.components(separatedBy: CharacterSet.decimalDigits.inverted).compactMap(Int.init)
+        if regexHSL.firstMatch(in: trimmed, range: range) != nil {
+            let nums = trimmed.components(separatedBy: CharacterSet.decimalDigits.inverted).compactMap(Int.init)
             if nums.count >= 3 {
                 return Color(hue: Double(nums[0])/360, saturation: Double(nums[1])/100, brightness: Double(nums[2])/100)
             }
@@ -110,279 +110,277 @@ struct ElementPressePapier: Identifiable {
         return nil
     }
 
-    // MARK: - Détection du sous-type texte (email, téléphone, date, code, url)
+    // MARK: - Text subtype detection (email, phone, date, code, url)
 
-    // Regex compilées une seule fois pour la détection de sous-type
-    private static let regexEmail     = try! NSRegularExpression(pattern: "^[A-Z0-9a-z._%+\\-]+@[A-Za-z0-9.\\-]+\\.[A-Za-z]{2,}$")
-    private static let regexURL       = try! NSRegularExpression(pattern: "^https?://\\S+|^www\\.\\S+", options: .caseInsensitive)
-    // Téléphone : international (+33, +1, +44…) et formats français/génériques
-    private static let regexPhone     = try! NSRegularExpression(
+    // Regex compiled once for subtype detection
+    private static let regexEmail = try! NSRegularExpression(pattern: "^[A-Z0-9a-z._%+\\-]+@[A-Za-z0-9.\\-]+\\.[A-Za-z]{2,}$")
+    private static let regexURL   = try! NSRegularExpression(pattern: "^https?://\\S+|^www\\.\\S+", options: .caseInsensitive)
+    // Phone: international (+33, +1, +44…) and common formats
+    private static let regexPhone = try! NSRegularExpression(
         pattern: #"^\+?(?:(?:\d[\s.\-]?){6,14}\d)$|^(?:0[1-9])(?:[\s.\-]?\d{2}){4}$|^0[1-9]\d{8}$"#
     )
-    // Date : formats courants dd/mm/yyyy, yyyy-mm-dd, "March 12 2025", "12 mars 2025", etc.
-    private static let regexDate      = try! NSRegularExpression(
+    // Date: common formats dd/mm/yyyy, yyyy-mm-dd, "March 12 2025", etc.
+    private static let regexDate  = try! NSRegularExpression(
         pattern: #"^\d{1,2}[\/\-\.]\d{1,2}[\/\-\.]\d{2,4}$|^\d{4}[\/\-\.]\d{1,2}[\/\-\.]\d{1,2}$|^(?:\d{1,2}\s)?(?:jan(?:uary|vier)?|feb(?:ruary|rier)?|mar(?:ch|s)?|apr(?:il|il)?|may|mai|jun(?:e|)?|jul(?:y|let)?|aug(?:ust|)?|ao[uû]t|sep(?:tember|tembre)?|oct(?:ober|obre)?|nov(?:ember|embre)?|dec(?:ember|embre)?)\s*\d{1,2}?,?\s*\d{2,4}$"#,
         options: .caseInsensitive
     )
-    // Code : présence de mots-clés ou structures typiques de code
-    private static let regexCode      = try! NSRegularExpression(
+    // Code: presence of keywords or typical code structures
+    private static let regexCode  = try! NSRegularExpression(
         pattern: #"(?:func |let |var |const |class |struct |enum |import |return |if |else|switch |case |for |while |def |async |await|\{|\}|=>|->|\(\)|<\/?\w+>|;\s*$)"#,
         options: .caseInsensitive
     )
 
-    static func detecterSousType(dans texte: String) -> SousTypeTexte {
-        let t     = texte.trimmingCharacters(in: .whitespacesAndNewlines)
-        let range = NSRange(t.startIndex..., in: t)
+    static func detectSubtype(in text: String) -> TextSubtype {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        let range   = NSRange(trimmed.startIndex..., in: trimmed)
 
-        // URL en premier (avant email pour éviter faux positifs)
-        if regexURL.firstMatch(in: t, range: range) != nil { return .url }
+        // URL first (before email to avoid false positives)
+        if regexURL.firstMatch(in: trimmed, range: range)   != nil { return .url }
         // Email
-        if regexEmail.firstMatch(in: t, range: range) != nil { return .email }
-        // Téléphone
-        if regexPhone.firstMatch(in: t, range: range) != nil { return .telephone }
+        if regexEmail.firstMatch(in: trimmed, range: range) != nil { return .email }
+        // Phone
+        if regexPhone.firstMatch(in: trimmed, range: range) != nil { return .phone }
         // Date
-        if regexDate.firstMatch(in: t, range: range) != nil { return .date }
-        // Code (seulement si le texte contient plusieurs mots ou lignes)
-        if t.count > 3 && regexCode.firstMatch(in: t, range: range) != nil { return .code }
+        if regexDate.firstMatch(in: trimmed, range: range)  != nil { return .date }
+        // Code (only if text contains multiple words or lines)
+        if trimmed.count > 3 && regexCode.firstMatch(in: trimmed, range: range) != nil { return .code }
 
-        return .texte
+        return .text
     }
 
-    var titreAffiche: String {
-        switch contenu {
-        case .texte(let s):
-            let debut = s.trimmingCharacters(in: .whitespacesAndNewlines)
-            return String(debut.prefix(60))
-        case .image: return "Image"
-        case .urlFichier(let url): return url.deletingPathExtension().lastPathComponent
-        case .inconnu: return "Inconnu"
+    var displayTitle: String {
+        switch content {
+        case .text(let s):
+            let trimmed = s.trimmingCharacters(in: .whitespacesAndNewlines)
+            return String(trimmed.prefix(60))
+        case .image:            return "Image"
+        case .fileURL(let url): return url.deletingPathExtension().lastPathComponent
+        case .unknown:          return "Unknown"
         }
     }
 
-    var iconeType: String {
-        switch contenu {
-        case .texte:
-            return sousTypeCache?.icone ?? "doc.plaintext"
-        case .image:     return "photo"
-        case .urlFichier: return "doc"
-        case .inconnu:   return "questionmark"
+    var typeIcon: String {
+        switch content {
+        case .text:             return cachedSubtype?.icon ?? "doc.plaintext"
+        case .image:            return "photo"
+        case .fileURL:          return "doc"
+        case .unknown:          return "questionmark"
         }
     }
 
-    var labelType: String {
-        switch contenu {
-        case .texte:
-            return sousTypeCache?.label ?? "Text"
-        case .image:     return "Image"
-        case .urlFichier(let url): return url.pathExtension.isEmpty ? "File" : url.pathExtension.uppercased()
-        case .inconnu:   return "Unknown"
+    var typeLabel: String {
+        switch content {
+        case .text:             return cachedSubtype?.label ?? "Text"
+        case .image:            return "Image"
+        case .fileURL(let url): return url.pathExtension.isEmpty ? "File" : url.pathExtension.uppercased()
+        case .unknown:          return "Unknown"
         }
     }
 
-    var couleurType: Color {
-        switch contenu {
-        case .texte:     return Color.blue
-        case .image:     return Color.purple
-        case .urlFichier: return Color.orange
-        case .inconnu:   return Color.gray
+    var typeColor: Color {
+        switch content {
+        case .text:    return Color.blue
+        case .image:   return Color.purple
+        case .fileURL: return Color.orange
+        case .unknown: return Color.gray
         }
     }
 }
 
-final class MoniteurPressePapier: ObservableObject {
-    static let shared = MoniteurPressePapier()
+final class ClipboardMonitor: ObservableObject {
+    static let shared = ClipboardMonitor()
 
-    @Published var elements: [ElementPressePapier] = [] { didSet { planifierSauvegarde() } }
+    @Published var items: [ClipboardItem] = [] { didSet { scheduleSave() } }
 
-    // OPTIMISATION 2 : DispatchWorkItem annulable — plus léger qu'un Timer recréé à chaque changement
-    private var workItemSauvegarde: DispatchWorkItem?
+    // OPTIMISATION 2: cancellable DispatchWorkItem — lighter than recreating a Timer on every change
+    private var saveWorkItem: DispatchWorkItem?
 
-    private func planifierSauvegarde() {
-        workItemSauvegarde?.cancel()
-        let item = DispatchWorkItem { [weak self] in self?.sauvegarderHistorique() }
-        workItemSauvegarde = item
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5, execute: item)
+    private func scheduleSave() {
+        saveWorkItem?.cancel()
+        let workItem = DispatchWorkItem { [weak self] in self?.saveHistory() }
+        saveWorkItem = workItem
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5, execute: workItem)
     }
 
-    // MARK: - État de la séquence (publié pour que l'UI puisse l'observer)
-    @Published private(set) var fileSequence: [ElementPressePapier] = []
-    @Published private(set) var indexSequence: Int = 0
+    // MARK: - Sequence state (published so the UI can observe it)
+    @Published private(set) var sequenceQueue: [ClipboardItem] = []
+    @Published private(set) var sequenceIndex: Int = 0
 
-    var estSequenceActive: Bool { !fileSequence.isEmpty }
-    var progressionSequence: (actuel: Int, total: Int) { (indexSequence, fileSequence.count) }
+    var isSequenceActive: Bool { !sequenceQueue.isEmpty }
+    var sequenceProgress: (current: Int, total: Int) { (sequenceIndex, sequenceQueue.count) }
 
-    private var minuterieSondage: Timer?
-    private var dernierNombreChangements: Int = NSPasteboard.general.changeCount
-    private let cleUD = "pressepapier.historique.v2"
+    private var pollingTimer: Timer?
+    private var lastChangeCount: Int = NSPasteboard.general.changeCount
+    private let storageKey = "clipboard.history.v2"
 
     // MARK: - CGEventTap
-    private var tapEvenement: CFMachPort?
-    private var sourceRunLoop: CFRunLoopSource?
+    private var eventTap: CFMachPort?
+    private var runLoopSource: CFRunLoopSource?
 
-    // Protection contre les appels concurrents à avancerSequence() déclenchés par ⌘V rapides
-    private var estEnAvance: Bool = false
+    // Protection against concurrent calls to advanceSequence() triggered by fast ⌘V
+    private var isAdvancing: Bool = false
 
     private init() {
-        chargerHistorique()
-        demarrerSondage()
+        loadHistory()
+        startPolling()
     }
 
-    // MARK: - Sondage
+    // MARK: - Polling
 
-    private func demarrerSondage() {
-        minuterieSondage = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
-            self?.verifierPressePapier()
+    private func startPolling() {
+        pollingTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
+            self?.checkClipboard()
         }
     }
 
-    private func verifierPressePapier() {
+    private func checkClipboard() {
         let pb = NSPasteboard.general
-        guard pb.changeCount != dernierNombreChangements else { return }
-        dernierNombreChangements = pb.changeCount
-        // Ne pas enregistrer les changements que nous avons déclenchés nous-mêmes (écriture de séquence)
-        guard !estSequenceActive else { return }
-        let nomApp = NSWorkspace.shared.frontmostApplication?.localizedName ?? "Inconnu"
+        guard pb.changeCount != lastChangeCount else { return }
+        lastChangeCount = pb.changeCount
+        // Do not record changes we triggered ourselves (sequence writing)
+        guard !isSequenceActive else { return }
+        let appName = NSWorkspace.shared.frontmostApplication?.localizedName ?? "Unknown"
 
-        // 1. URLs de fichiers — doit précéder la vérification image
+        // 1. File URLs — must precede image check
         if let urls = pb.readObjects(forClasses: [NSURL.self]) as? [URL],
-           let premiere = urls.first, premiere.isFileURL {
-            ajouterElement(ElementPressePapier(contenu: .urlFichier(premiere), source: nomApp, date: Date()))
+           let first = urls.first, first.isFileURL {
+            addItem(ClipboardItem(content: .fileURL(first), source: appName, date: Date()))
             return
         }
 
-        // 2. Vraies images bitmap
-        let typesImage: [NSPasteboard.PasteboardType] = [.tiff, .png,
+        // 2. True bitmap images
+        let imageTypes: [NSPasteboard.PasteboardType] = [.tiff, .png,
             NSPasteboard.PasteboardType("com.adobe.pdf"),
             NSPasteboard.PasteboardType("public.jpeg")]
-        let aDonneesImage = typesImage.contains { pb.data(forType: $0) != nil }
-        if aDonneesImage,
+        let hasImageData = imageTypes.contains { pb.data(forType: $0) != nil }
+        if hasImageData,
            let imgs = pb.readObjects(forClasses: [NSImage.self]) as? [NSImage],
-           let premiere = imgs.first {
-            ajouterElement(ElementPressePapier(contenu: .image(premiere), source: nomApp, date: Date()))
+           let first = imgs.first {
+            addItem(ClipboardItem(content: .image(first), source: appName, date: Date()))
             return
         }
 
-        // 3. Texte brut
-        if let texte = pb.string(forType: .string), !texte.isEmpty {
-            if let dernier = elements.first(where: { !$0.estEpingle }), case .texte(let t) = dernier.contenu, t == texte { return }
-            ajouterElement(ElementPressePapier(contenu: .texte(texte), source: nomApp, date: Date()))
+        // 3. Plain text
+        if let text = pb.string(forType: .string), !text.isEmpty {
+            if let last = items.first(where: { !$0.isPinned }), case .text(let t) = last.content, t == text { return }
+            addItem(ClipboardItem(content: .text(text), source: appName, date: Date()))
         }
     }
 
-    private func ajouterElement(_ element: ElementPressePapier) {
+    private func addItem(_ item: ClipboardItem) {
         DispatchQueue.main.async { [weak self] in
             guard let self = self else { return }
-            // OPTIMISATION 3 : une seule passe sur la liste au lieu de deux .filter() successifs
-            var epingles    = [ElementPressePapier]()
-            var nonEpingles = [ElementPressePapier]()
-            for e in self.elements {
-                if e.estEpingle { epingles.append(e) } else { nonEpingles.append(e) }
+            // OPTIMISATION 3: single pass over the list instead of two successive .filter() calls
+            var pinned   = [ClipboardItem]()
+            var unpinned = [ClipboardItem]()
+            for entry in self.items {
+                if entry.isPinned { pinned.append(entry) } else { unpinned.append(entry) }
             }
-            nonEpingles.insert(element, at: 0)
-            if nonEpingles.count > 150 { nonEpingles = Array(nonEpingles.prefix(150)) }
-            self.elements = epingles + nonEpingles
+            unpinned.insert(item, at: 0)
+            if unpinned.count > 150 { unpinned = Array(unpinned.prefix(150)) }
+            self.items = pinned + unpinned
         }
     }
 
-    // MARK: - Actions de base sur le presse-papiers
+    // MARK: - Basic clipboard actions
 
-    func coller(element: ElementPressePapier) {
-        copierVersPressePapier(element: element)
+    func paste(item: ClipboardItem) {
+        copyToClipboard(item: item)
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-            let src  = CGEventSource(stateID: .hidSystemState)
-            let bas  = CGEvent(keyboardEventSource: src, virtualKey: 9, keyDown: true)
-            let haut = CGEvent(keyboardEventSource: src, virtualKey: 9, keyDown: false)
-            bas?.flags  = .maskCommand; haut?.flags = .maskCommand
-            bas?.post(tap: .cgSessionEventTap); haut?.post(tap: .cgSessionEventTap)
+            let source = CGEventSource(stateID: .hidSystemState)
+            let keyDown = CGEvent(keyboardEventSource: source, virtualKey: 9, keyDown: true)
+            let keyUp   = CGEvent(keyboardEventSource: source, virtualKey: 9, keyDown: false)
+            keyDown?.flags = .maskCommand; keyUp?.flags = .maskCommand
+            keyDown?.post(tap: .cgSessionEventTap); keyUp?.post(tap: .cgSessionEventTap)
         }
     }
 
-    func copierVersPressePapier(element: ElementPressePapier) {
+    func copyToClipboard(item: ClipboardItem) {
         let pb = NSPasteboard.general
         pb.clearContents()
-        switch element.contenu {
-        case .texte(let t):          pb.setString(t, forType: .string)
-        case .image(let img):        pb.writeObjects([img])
-        case .urlFichier(let url):   pb.writeObjects([url as NSURL])
-        case .inconnu: break
+        switch item.content {
+        case .text(let t):      pb.setString(t, forType: .string)
+        case .image(let img):   pb.writeObjects([img])
+        case .fileURL(let url): pb.writeObjects([url as NSURL])
+        case .unknown: break
         }
-        // Synchroniser dernierNombreChangements pour que le sondage ignore cette écriture
-        dernierNombreChangements = pb.changeCount
+        // Sync lastChangeCount so polling ignores this write
+        lastChangeCount = pb.changeCount
     }
 
-    func basculerEpingle(element: ElementPressePapier) {
-        if let idx = elements.firstIndex(where: { $0.id == element.id }) {
-            elements[idx].estEpingle.toggle()
-            elements = elements.filter { $0.estEpingle } + elements.filter { !$0.estEpingle }
+    func togglePin(item: ClipboardItem) {
+        if let idx = items.firstIndex(where: { $0.id == item.id }) {
+            items[idx].isPinned.toggle()
+            items = items.filter { $0.isPinned } + items.filter { !$0.isPinned }
         }
     }
 
-    func supprimer(element: ElementPressePapier) { elements.removeAll { $0.id == element.id } }
-    func toutEffacer() { elements.removeAll { !$0.estEpingle } }
+    func delete(item: ClipboardItem) { items.removeAll { $0.id == item.id } }
+    func clearAll() { items.removeAll { !$0.isPinned } }
 
-    // MARK: - Demande d'ouverture du panneau
+    // MARK: - Panel open request
 
-    static let notificationOuverturePanneau = Notification.Name("MoniteurPressePapier.ouvrirPanneau")
+    static let panelOpenNotification = Notification.Name("ClipboardMonitor.openPanel")
 
-    func demanderOuverturePanneau() {
-        NotificationCenter.default.post(name: Self.notificationOuverturePanneau, object: self)
+    func requestPanelOpen() {
+        NotificationCenter.default.post(name: Self.panelOpenNotification, object: self)
     }
 
-    // MARK: - Coller en séquence
+    // MARK: - Multi-paste sequence
 
-    func demarrerSequence(elements: [ElementPressePapier]) {
-        guard !elements.isEmpty else { return }
-        fileSequence  = elements
-        indexSequence = 0
-        estEnAvance   = false
-        copierVersPressePapier(element: elements[0])
-        installerTapEvenement()
+    func startSequence(items: [ClipboardItem]) {
+        guard !items.isEmpty else { return }
+        sequenceQueue = items
+        sequenceIndex = 0
+        isAdvancing   = false
+        copyToClipboard(item: items[0])
+        installEventTap()
     }
 
-    func annulerSequence() {
-        fileSequence  = []
-        indexSequence = 0
-        estEnAvance   = false
-        supprimerTapEvenement()
+    func cancelSequence() {
+        sequenceQueue = []
+        sequenceIndex = 0
+        isAdvancing   = false
+        removeEventTap()
     }
 
-    fileprivate func avancerSequence() {
-        guard estSequenceActive, !estEnAvance else { return }
-        estEnAvance = true
+    fileprivate func advanceSequence() {
+        guard isSequenceActive, !isAdvancing else { return }
+        isAdvancing = true
 
-        indexSequence += 1
-        if indexSequence < fileSequence.count {
-            copierVersPressePapier(element: fileSequence[indexSequence])
+        sequenceIndex += 1
+        if sequenceIndex < sequenceQueue.count {
+            copyToClipboard(item: sequenceQueue[sequenceIndex])
         } else {
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { [weak self] in
-                self?.annulerSequence()
+                self?.cancelSequence()
             }
         }
 
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { [weak self] in
-            self?.estEnAvance = false
+            self?.isAdvancing = false
         }
     }
 
-    // MARK: - Installation du CGEventTap
+    // MARK: - CGEventTap installation
 
-    private func installerTapEvenement() {
-        supprimerTapEvenement()
+    private func installEventTap() {
+        removeEventTap()
 
-        let masque = CGEventMask(1 << CGEventType.keyDown.rawValue)
+        let mask = CGEventMask(1 << CGEventType.keyDown.rawValue)
 
         let tap = CGEvent.tapCreate(
             tap: .cgSessionEventTap,
             place: .tailAppendEventTap,
             options: .listenOnly,
-            eventsOfInterest: masque,
+            eventsOfInterest: mask,
             callback: { _, _, event, refcon -> Unmanaged<CGEvent>? in
                 guard let refcon else { return Unmanaged.passRetained(event) }
-                let moniteur = Unmanaged<MoniteurPressePapier>.fromOpaque(refcon).takeUnretainedValue()
-                let codeTouche = event.getIntegerValueField(.keyboardEventKeycode)
-                if codeTouche == 9, event.flags.contains(.maskCommand) {
+                let monitor = Unmanaged<ClipboardMonitor>.fromOpaque(refcon).takeUnretainedValue()
+                let keyCode = event.getIntegerValueField(.keyboardEventKeycode)
+                if keyCode == 9, event.flags.contains(.maskCommand) {
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
-                        moniteur.avancerSequence()
+                        monitor.advanceSequence()
                     }
                 }
                 return Unmanaged.passRetained(event)
@@ -391,67 +389,67 @@ final class MoniteurPressePapier: ObservableObject {
         )
 
         guard let tap else {
-            let alerte = NSAlert()
-            alerte.messageText = L.titreAccessibilite
-            alerte.informativeText = L.texteAccessibilite
-            alerte.alertStyle = .warning
-            alerte.addButton(withTitle: L.ouvrirReglages)
-            alerte.addButton(withTitle: L.annuler)
-            if alerte.runModal() == .alertFirstButtonReturn {
+            let alert = NSAlert()
+            alert.messageText     = L.accessibilityTitle
+            alert.informativeText = L.accessibilityText
+            alert.alertStyle      = .warning
+            alert.addButton(withTitle: L.openSettings)
+            alert.addButton(withTitle: L.cancel)
+            if alert.runModal() == .alertFirstButtonReturn {
                 NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")!)
             }
-            annulerSequence()
+            cancelSequence()
             return
         }
 
-        tapEvenement = tap
-        sourceRunLoop = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, tap, 0)
-        CFRunLoopAddSource(CFRunLoopGetMain(), sourceRunLoop, .commonModes)
+        eventTap      = tap
+        runLoopSource = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, tap, 0)
+        CFRunLoopAddSource(CFRunLoopGetMain(), runLoopSource, .commonModes)
         CGEvent.tapEnable(tap: tap, enable: true)
     }
 
-    private func supprimerTapEvenement() {
-        if let tap = tapEvenement {
+    private func removeEventTap() {
+        if let tap = eventTap {
             CGEvent.tapEnable(tap: tap, enable: false)
-            if let src = sourceRunLoop {
+            if let src = runLoopSource {
                 CFRunLoopRemoveSource(CFRunLoopGetMain(), src, .commonModes)
             }
-            tapEvenement  = nil
-            sourceRunLoop = nil
+            eventTap      = nil
+            runLoopSource = nil
         }
     }
 
-    // MARK: - Persistance
+    // MARK: - Persistence
 
-    private func sauvegarderHistorique() {
-        let dicts = elements.compactMap { element -> [String: Any]? in
-            var d: [String: Any] = ["source": element.source, "date": element.date.timeIntervalSince1970, "epingle": element.estEpingle]
-            switch element.contenu {
-            case .texte(let t):        d["type"] = "texte"; d["valeur"] = t
-            case .urlFichier(let url): d["type"] = "fichier"; d["valeur"] = url.absoluteString
-            default: return nil  // images non persistées intentionnellement
+    private func saveHistory() {
+        let dicts = items.compactMap { item -> [String: Any]? in
+            var dict: [String: Any] = ["source": item.source, "date": item.date.timeIntervalSince1970, "pinned": item.isPinned]
+            switch item.content {
+            case .text(let t):      dict["type"] = "text"; dict["value"] = t
+            case .fileURL(let url): dict["type"] = "file"; dict["value"] = url.absoluteString
+            default: return nil  // images intentionally not persisted
             }
-            return d
+            return dict
         }
-        UserDefaults.standard.set(dicts, forKey: cleUD)
+        UserDefaults.standard.set(dicts, forKey: storageKey)
     }
 
-    private func chargerHistorique() {
-        guard let dicts = UserDefaults.standard.object(forKey: cleUD) as? [[String: Any]] else { return }
-        elements = dicts.compactMap { d in
-            guard let type = d["type"] as? String,
-                  let val  = d["valeur"] as? String,
-                  let src  = d["source"] as? String,
-                  let ts   = d["date"] as? TimeInterval else { return nil }
-            let contenu: ContenuPressePapier
-            if type == "fichier", let url = URL(string: val) {
-                contenu = .urlFichier(url)
+    private func loadHistory() {
+        guard let dicts = UserDefaults.standard.object(forKey: storageKey) as? [[String: Any]] else { return }
+        items = dicts.compactMap { dict in
+            guard let type   = dict["type"] as? String,
+                  let value  = dict["value"] as? String,
+                  let source = dict["source"] as? String,
+                  let ts     = dict["date"] as? TimeInterval else { return nil }
+            let content: ClipboardContent
+            if type == "file", let url = URL(string: value) {
+                content = .fileURL(url)
             } else {
-                contenu = .texte(val)
+                content = .text(value)
             }
-            var element = ElementPressePapier(contenu: contenu, source: src, date: Date(timeIntervalSince1970: ts))
-            element.estEpingle = d["epingle"] as? Bool ?? false
-            return element
+            var item = ClipboardItem(content: content, source: source, date: Date(timeIntervalSince1970: ts))
+            item.isPinned = dict["pinned"] as? Bool ?? false
+            return item
         }
     }
 }

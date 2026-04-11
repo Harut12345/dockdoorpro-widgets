@@ -1,53 +1,53 @@
 import SwiftUI
 import DockDoorWidgetSDK
 
-struct VuePressePapiersWidget: View {
-    let taille: CGSize
-    let estVertical: Bool
-    @ObservedObject var moniteur: MoniteurPressePapier
-    var symboleIcone: String = "clipboard.fill"
-    /// Contrôlé par le réglage "Afficher l'icône" dans les paramètres du widget.
-    /// Par défaut false : la vue double affiche uniquement le texte.
-    var afficherIcone: Bool = false
+struct ClipboardWidgetView: View {
+    let size: CGSize
+    let isVertical: Bool
+    @ObservedObject var monitor: ClipboardMonitor
+    var iconSymbol: String = "clipboard.fill"
+    /// Controlled by the "Show icon" setting in widget parameters.
+    /// Default false: the extended view shows only text.
+    var showIcon: Bool = false
 
-    private var dim: CGFloat { min(taille.width, taille.height) }
-    private var estEtendu: Bool {
-        estVertical ? taille.height > taille.width * 1.5 : taille.width > taille.height * 1.5
+    private var dim: CGFloat { min(size.width, size.height) }
+    private var isExtended: Bool {
+        isVertical ? size.height > size.width * 1.5 : size.width > size.height * 1.5
     }
 
     var body: some View {
         Group {
-            if estEtendu { dispositionEtendue } else { dispositionCompacte }
+            if isExtended { extendedLayout } else { compactLayout }
         }
     }
 
-    // MARK: - Compact : icône seule
+    // MARK: - Compact: icon only
 
-    private var dispositionCompacte: some View {
-        Image(systemName: symboleIcone)
+    private var compactLayout: some View {
+        Image(systemName: iconSymbol)
             .resizable()
             .aspectRatio(contentMode: .fit)
             .frame(width: dim * 0.437, height: dim * 0.437)
             .foregroundStyle(.secondary)
     }
 
-    // MARK: - Étendu : texte centré (+ icône optionnelle)
+    // MARK: - Extended: centered text (+ optional icon)
 
-    private var dernierCopie: ElementPressePapier? {
-        moniteur.elements.first { !$0.estEpingle }
+    private var lastCopied: ClipboardItem? {
+        monitor.items.first { !$0.isPinned }
     }
 
-    private var dispositionEtendue: some View {
+    private var extendedLayout: some View {
         HStack(spacing: dim * 0.08) {
-            if afficherIcone {
-                Image(systemName: symboleIcone)
+            if showIcon {
+                Image(systemName: iconSymbol)
                     .font(.system(size: dim * 0.28))
                     .foregroundStyle(.secondary)
                     .fixedSize()
             }
 
-            if let dernier = dernierCopie {
-                TexteDefilantWidget(element: dernier, dim: dim, estVertical: estVertical)
+            if let last = lastCopied {
+                ScrollingTextWidget(item: last, dim: dim, isVertical: isVertical)
             } else {
                 Text(S("Vide", "Empty"))
                     .font(.system(size: dim * 0.28))
@@ -59,29 +59,29 @@ struct VuePressePapiersWidget: View {
     }
 }
 
-// MARK: - Widget texte défilant
+// MARK: - Scrolling widget text
 
-private struct TexteDefilantWidget: View {
-    let element: ElementPressePapier
+private struct ScrollingTextWidget: View {
+    let item: ClipboardItem
     let dim: CGFloat
-    let estVertical: Bool
+    let isVertical: Bool
 
-    private var taillePolic: CGFloat {
-        let proportionnelle = estVertical ? dim * 0.30 : dim * 0.32
-        return max(proportionnelle - 1, 9)
+    private var fontSize: CGFloat {
+        let proportional = isVertical ? dim * 0.30 : dim * 0.32
+        return max(proportional - 1, 9)
     }
 
-    private var facteurMin: CGFloat {
-        taillePolic > 9 ? (9 / taillePolic) : 1.0
+    private var minScaleFactor: CGFloat {
+        fontSize > 9 ? (9 / fontSize) : 1.0
     }
 
     var body: some View {
-        Text(element.titreAffiche)
-            .font(.system(size: taillePolic, weight: .medium, design: .rounded))
+        Text(item.displayTitle)
+            .font(.system(size: fontSize, weight: .medium, design: .rounded))
             .foregroundStyle(.primary)
             .multilineTextAlignment(.center)
             .lineLimit(2)
-            .minimumScaleFactor(facteurMin)
+            .minimumScaleFactor(minScaleFactor)
             .truncationMode(.tail)
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
     }

@@ -5,121 +5,121 @@ import AVFoundation
 import AVKit
 import Quartz
 
-// MARK: - NSPanel personnalisé (accepte la saisie clavier)
+// MARK: - Custom NSPanel (accepts keyboard input)
 
-/// Sous-classe de NSPanel qui autorise le focus clavier tout en restant non-activant.
-/// Nécessaire pour que les champs de texte et les raccourcis clavier fonctionnent
-/// dans le panneau flottant sans voler le focus à l'application active.
-final class PanneauEditable: NSPanel {
+/// NSPanel subclass that allows keyboard focus while remaining non-activating.
+/// Required so that text fields and keyboard shortcuts work
+/// in the floating panel without stealing focus from the active application.
+final class EditablePanel: NSPanel {
     override var canBecomeKey: Bool { true }
     override var canBecomeMain: Bool { false }
     override var acceptsFirstResponder: Bool { true }
 }
 
-// MARK: - Aide couleur d'accentuation
+// MARK: - Accent color helper
 
 private extension Color {
-    /// Couleur d'accentuation système assombrie d'environ 20 % pour un rendu moins vif.
-    /// Mise en cache statique : évite de recalculer la blending à chaque accès.
+    /// System accent color darkened by ~20% for a less vivid appearance.
+    /// Static cache: avoids recalculating the blend on every access.
     static let accentAttenuation: Color = {
         Color(NSColor.controlAccentColor.blended(withFraction: 0.22, of: .black) ?? .controlAccentColor)
     }()
 }
 
-// MARK: - Helpers partagés
+// MARK: - Shared helpers
 
 private extension DateFormatter {
-    // OPTIMISATION 1 : DateFormatter est coûteux à instancier — on le crée une seule fois
-    // au démarrage (lazy static let) au lieu de le recréer à chaque affichage de date.
-    static let heureSeule: DateFormatter = {
-        let f = DateFormatter(); f.dateFormat = "HH:mm"; f.locale = L.localeDate; return f
+    // OPTIMISATION 1: DateFormatter is expensive to instantiate — created once
+    // at startup (lazy static let) instead of recreating it on every date display.
+    static let timeOnly: DateFormatter = {
+        let f = DateFormatter(); f.dateFormat = "HH:mm"; f.locale = L.dateLocale; return f
     }()
-    static let datePleine: DateFormatter = {
+    static let fullDate: DateFormatter = {
         let f = DateFormatter()
-        f.locale = L.localeDate
-        f.dateFormat = langueWidget() == "en" ? "MMM d, HH:mm" : "d MMMM HH:mm"
+        f.locale = L.dateLocale
+        f.dateFormat = widgetLanguage() == "en" ? "MMM d, HH:mm" : "d MMMM HH:mm"
         return f
     }()
 }
 
-// MARK: - Helper PNG pour sauvegarde image
+// MARK: - PNG helper for image saving
 
-private func donneesPNG(depuis image: NSImage) -> Data? {
+private func pngData(from image: NSImage) -> Data? {
     guard let tiff = image.tiffRepresentation,
           let bmp  = NSBitmapImageRep(data: tiff) else { return nil }
     return bmp.representation(using: .png, properties: [:])
 }
 
-// MARK: - Enum de filtre
+// MARK: - Filter enum
 
-enum FiltrePressePapier: String, CaseIterable {
-    case tout    = "tout"
-    case medias  = "medias"
-    case donnees = "donnees"
+enum ClipboardFilter: String, CaseIterable {
+    case all   = "all"
+    case media = "media"
+    case data  = "data"
 
-    /// Étiquette traduite selon la langue active.
-    var etiquette: String {
+    /// Label translated according to the active language.
+    var label: String {
         switch self {
-        case .tout:    return L.tout
-        case .medias:  return L.medias
-        case .donnees: return L.donnees
+        case .all:   return L.all
+        case .media: return L.media
+        case .data:  return L.data
         }
     }
 
-    var icone: String {
+    var icon: String {
         switch self {
-        case .tout:    return "square.grid.2x2"
-        case .medias:  return "photo"
-        case .donnees: return "info.circle"
+        case .all:   return "square.grid.2x2"
+        case .media: return "photo"
+        case .data:  return "info.circle"
         }
     }
 }
 
-// MARK: - Détection de couleur
-// OPTIMISATION 9 : les regex et la fonction detecterCouleur ont été déplacées dans
-// ElementPressePapier (ClipboardMonitor.swift) et le résultat est mis en cache à la
-// création de chaque élément dans `couleurCachee`. On conserve ici un alias local pour
-// les quelques appels qui opèrent sur du texte brut en dehors d'un ElementPressePapier.
-private func detecterCouleur(dans texte: String) -> Color? {
-    ElementPressePapier.detecterCouleurStatique(dans: texte)
+// MARK: - Color detection
+// OPTIMISATION 9: the regex and detectColor function have been moved into
+// ClipboardItem (ClipboardMonitor.swift) and the result is cached at item
+// creation time in `cachedColor`. A local alias is kept here for the few
+// calls that operate on raw text outside of a ClipboardItem.
+private func detectColor(in text: String) -> Color? {
+    ClipboardItem.detectColorStatic(in: text)
 }
 
-// MARK: - Échantillon de couleur
+// MARK: - Color swatch
 
-private struct VueEchantillonCouleur: View {
-    let couleur: Color
-    let etiquette: String
+private struct ColorSwatchView: View {
+    let color: Color
+    let label: String
 
     var body: some View {
         HStack(spacing: 8) {
             RoundedRectangle(cornerRadius: 6)
-                .fill(couleur)
+                .fill(color)
                 .frame(width: 20, height: 20)
                 .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.primary.opacity(0.15), lineWidth: 0.5))
-            Text(etiquette)
+            Text(label)
                 .font(.system(size: 11, design: .monospaced))
                 .foregroundStyle(.secondary)
         }
     }
 }
 
-// MARK: - Aperçu de fichier (basé sur le contenu, sans QLPreviewView)
+// MARK: - File preview (content-based, no QLPreviewView)
 
-/// Aperçu PDF avec boutons de navigation de pages ← →
-private struct ApercuPDFPages: View {
+/// PDF preview with page navigation buttons ← →
+private struct PDFPagesPreview: View {
     let url: URL
-    @State private var pageCourante: Int = 0
-    @State private var nombrePages:  Int = 0
+    @State private var currentPage: Int = 0
+    @State private var pageCount:   Int = 0
 
     var body: some View {
         VStack(spacing: 0) {
-            VuePDFKit(url: url, pageCourante: $pageCourante, nombrePages: $nombrePages)
+            PDFKitView(url: url, currentPage: $currentPage, pageCount: $pageCount)
                 .clipShape(RoundedRectangle(cornerRadius: 12))
 
-            if nombrePages > 1 {
+            if pageCount > 1 {
                 HStack(spacing: 12) {
                     Button {
-                        if pageCourante > 0 { pageCourante -= 1 }
+                        if currentPage > 0 { currentPage -= 1 }
                     } label: {
                         Image(systemName: "chevron.left")
                             .font(.system(size: 13, weight: .semibold))
@@ -127,15 +127,15 @@ private struct ApercuPDFPages: View {
                             .background(Color.primary.opacity(0.08), in: RoundedRectangle(cornerRadius: 8))
                     }
                     .buttonStyle(.plain)
-                    .disabled(pageCourante == 0)
+                    .disabled(currentPage == 0)
 
-                    Text("\(pageCourante + 1) / \(nombrePages)")
+                    Text("\(currentPage + 1) / \(pageCount)")
                         .font(.system(size: 11, weight: .medium, design: .rounded))
                         .foregroundStyle(.secondary)
                         .frame(minWidth: 48)
 
                     Button {
-                        if pageCourante < nombrePages - 1 { pageCourante += 1 }
+                        if currentPage < pageCount - 1 { currentPage += 1 }
                     } label: {
                         Image(systemName: "chevron.right")
                             .font(.system(size: 13, weight: .semibold))
@@ -143,7 +143,7 @@ private struct ApercuPDFPages: View {
                             .background(Color.primary.opacity(0.08), in: RoundedRectangle(cornerRadius: 8))
                     }
                     .buttonStyle(.plain)
-                    .disabled(pageCourante == nombrePages - 1)
+                    .disabled(currentPage == pageCount - 1)
                 }
                 .padding(.top, 8)
             }
@@ -151,81 +151,81 @@ private struct ApercuPDFPages: View {
     }
 }
 
-private struct VuePDFKit: NSViewRepresentable {
+private struct PDFKitView: NSViewRepresentable {
     let url: URL
-    @Binding var pageCourante: Int
-    @Binding var nombrePages:  Int
+    @Binding var currentPage: Int
+    @Binding var pageCount:   Int
 
-    func makeCoordinator() -> Coordinateur { Coordinateur(self) }
+    func makeCoordinator() -> Coordinator { Coordinator(self) }
 
     func makeNSView(context: Context) -> PDFView {
-        let vuePDF = PDFView()
-        vuePDF.autoScales         = true
-        vuePDF.displayMode        = .singlePage
-        vuePDF.displayDirection   = .horizontal
-        vuePDF.displaysPageBreaks = false
-        vuePDF.backgroundColor    = .clear
-        vuePDF.pageShadowsEnabled = false
-        // Supprimer le fond de la vue de défilement interne
-        if let scrollView = vuePDF.subviews.first as? NSScrollView {
+        let pdfView = PDFView()
+        pdfView.autoScales         = true
+        pdfView.displayMode        = .singlePage
+        pdfView.displayDirection   = .horizontal
+        pdfView.displaysPageBreaks = false
+        pdfView.backgroundColor    = .clear
+        pdfView.pageShadowsEnabled = false
+        // Remove the background of the internal scroll view
+        if let scrollView = pdfView.subviews.first as? NSScrollView {
             scrollView.drawsBackground = false
             scrollView.contentView.layer?.backgroundColor = .none
         }
         if let doc = PDFDocument(url: url) {
-            vuePDF.document = doc
+            pdfView.document = doc
             DispatchQueue.main.async {
-                nombrePages   = doc.pageCount
-                pageCourante  = 0
+                pageCount   = doc.pageCount
+                currentPage = 0
             }
         }
         NotificationCenter.default.addObserver(
             context.coordinator,
-            selector: #selector(Coordinateur.pageChangee(_:)),
+            selector: #selector(Coordinator.pageChanged(_:)),
             name: .PDFViewPageChanged,
-            object: vuePDF
+            object: pdfView
         )
-        return vuePDF
+        return pdfView
     }
 
-    func updateNSView(_ vuePDF: PDFView, context: Context) {
-        guard let doc  = vuePDF.document,
-              let page = doc.page(at: pageCourante),
-              vuePDF.currentPage != page else { return }
-        vuePDF.go(to: page)
+    func updateNSView(_ pdfView: PDFView, context: Context) {
+        guard let doc  = pdfView.document,
+              let page = doc.page(at: currentPage),
+              pdfView.currentPage != page else { return }
+        pdfView.go(to: page)
     }
 
-    class Coordinateur: NSObject {
-        var parent: VuePDFKit
-        init(_ parent: VuePDFKit) { self.parent = parent }
+    class Coordinator: NSObject {
+        var parent: PDFKitView
+        init(_ parent: PDFKitView) { self.parent = parent }
 
-        @objc func pageChangee(_ notification: Notification) {
-            guard let vuePDF = notification.object as? PDFView,
-                  let doc    = vuePDF.document,
-                  let page   = vuePDF.currentPage else { return }
+        @objc func pageChanged(_ notification: Notification) {
+            guard let pdfView = notification.object as? PDFView,
+                  let doc     = pdfView.document,
+                  let page    = pdfView.currentPage else { return }
             DispatchQueue.main.async {
-                self.parent.pageCourante = doc.index(for: page)
+                self.parent.currentPage = doc.index(for: page)
             }
         }
     }
 }
 
-/// Aperçu texte : lit le fichier en UTF-8 et l'affiche dans une vue défilante.
-/// Fonctionne pour .txt, .swift, .py, .js, .html, .css, .md, .json, .xml, etc.
-private struct ApercuFichierTexte: View {
+/// Text preview: reads the file in UTF-8 and displays it in a scrollable view.
+/// Works for .txt, .swift, .py, .js, .html, .css, .md, .json, .xml, etc.
+private struct TextFilePreview: View {
     let url: URL
-    @State private var texte: String = ""
-    @State private var echec: Bool = false
+    @State private var text:   String = ""
+    @State private var failed: Bool   = false
 
     var body: some View {
         Group {
-            if echec {
-                ApercuFichierNonSupporte(url: url)
-            } else if texte.isEmpty {
+            if failed {
+                UnsupportedFilePreview(url: url)
+            } else if text.isEmpty {
                 ProgressView()
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 ScrollView([.vertical, .horizontal]) {
-                    Text(texte)
+                    Text(text)
                         .font(.system(size: 12, design: .monospaced))
                         .foregroundStyle(.primary)
                         .textSelection(.enabled)
@@ -234,32 +234,32 @@ private struct ApercuFichierTexte: View {
                 }
             }
         }
-        .onAppear { charger() }
-        .onChange(of: url) { charger() }
+        .onAppear { load() }
+        .onChange(of: url) { load() }
     }
 
-    private func charger() {
-        texte = ""
-        echec = false
+    private func load() {
+        text   = ""
+        failed = false
         DispatchQueue.global(qos: .userInitiated).async {
-            // Lire jusqu'à 200 Ko pour éviter de bloquer l'interface avec de gros fichiers
+            // Read up to 200 KB to avoid blocking the UI with large files
             guard let handle = try? FileHandle(forReadingFrom: url) else {
-                DispatchQueue.main.async { echec = true }
+                DispatchQueue.main.async { failed = true }
                 return
             }
-            let data = handle.readData(ofLength: 200_000)
+            let data   = handle.readData(ofLength: 200_000)
             handle.closeFile()
-            let resultat = String(data: data, encoding: .utf8)
-                        ?? String(data: data, encoding: .isoLatin1)
+            let result = String(data: data, encoding: .utf8)
+                      ?? String(data: data, encoding: .isoLatin1)
             DispatchQueue.main.async {
-                if let resultat { texte = resultat } else { echec = true }
+                if let result { text = result } else { failed = true }
             }
         }
     }
 }
 
-/// Aperçu d'image (png, jpg, gif, webp, tiff, heic…)
-private struct ApercuFichierImage: View {
+/// Image preview (png, jpg, gif, webp, tiff, heic…)
+private struct ImageFilePreview: View {
     let url: URL
     @State private var image: NSImage? = nil
 
@@ -284,19 +284,19 @@ private struct ApercuFichierImage: View {
     }
 }
 
-/// NSView custom avec AVPlayerLayer en couche directe — aucun fond noir possible.
-/// Contrairement à AVPlayerView, on contrôle exactement ce qui est dessiné.
-private final class NSVuePlayerCouche: NSView {
-    let couchePlayer: AVPlayerLayer
+/// Custom NSView with a direct AVPlayerLayer — no black background possible.
+/// Unlike AVPlayerView, we control exactly what is drawn.
+private final class NSLayerPlayerView: NSView {
+    let playerLayer: AVPlayerLayer
 
-    init(lecteur: AVPlayer) {
-        couchePlayer = AVPlayerLayer(player: lecteur)
-        couchePlayer.videoGravity = .resizeAspect
-        couchePlayer.backgroundColor = .clear
+    init(player: AVPlayer) {
+        playerLayer = AVPlayerLayer(player: player)
+        playerLayer.videoGravity = .resizeAspect
+        playerLayer.backgroundColor = .clear
         super.init(frame: .zero)
         wantsLayer = true
         layer?.backgroundColor = .clear
-        layer?.addSublayer(couchePlayer)
+        layer?.addSublayer(playerLayer)
     }
     required init?(coder: NSCoder) { fatalError() }
 
@@ -304,41 +304,41 @@ private final class NSVuePlayerCouche: NSView {
         super.layout()
         CATransaction.begin()
         CATransaction.setDisableActions(true)
-        couchePlayer.frame = bounds
+        playerLayer.frame = bounds
         CATransaction.commit()
     }
 }
 
-/// Lecteur AVPlayer encapsulé dans NSViewRepresentable via couche directe.
-/// Fond 100 % transparent : pas de bandes noires, pas de zoom.
-private struct VueAVPlayer: NSViewRepresentable {
-    let lecteur: AVPlayer
+/// AVPlayer wrapped in NSViewRepresentable via a direct layer.
+/// 100% transparent background: no black bars, no zoom.
+private struct AVPlayerView: NSViewRepresentable {
+    let player: AVPlayer
 
-    func makeNSView(context: Context) -> NSVuePlayerCouche {
-        NSVuePlayerCouche(lecteur: lecteur)
+    func makeNSView(context: Context) -> NSLayerPlayerView {
+        NSLayerPlayerView(player: player)
     }
 
-    func updateNSView(_ vue: NSVuePlayerCouche, context: Context) {
-        if vue.couchePlayer.player !== lecteur {
-            vue.couchePlayer.player = lecteur
+    func updateNSView(_ view: NSLayerPlayerView, context: Context) {
+        if view.playerLayer.player !== player {
+            view.playerLayer.player = player
         }
     }
 }
 
-/// Aperçu vidéo : miniature (frame extraite à la taille de l'aperçu) + icône play.
-/// Un clic lance la vidéo directement dans la vue via AVPlayer — pas de fenêtre externe.
-private struct ApercuFichierVideo: View {
+/// Video preview: thumbnail (frame extracted at preview size) + play icon.
+/// A tap starts the video directly in the view via AVPlayer — no external window.
+private struct VideoFilePreview: View {
     let url: URL
-    @State private var image: NSImage? = nil
-    @State private var lecteur: AVPlayer? = nil
-    @State private var videoPreteAfficher = false   // true dès la 1ère frame rendue
-    @State private var estSilence = false
+    @State private var image:            NSImage? = nil
+    @State private var player:           AVPlayer? = nil
+    @State private var videoReadyToShow: Bool = false   // true as soon as the first frame is rendered
+    @State private var isMuted:          Bool = false
 
     var body: some View {
         GeometryReader { geo in
             ZStack {
-                // ── Miniature en fond permanent ───────────────────────────────
-                // Visible jusqu'à ce que la vidéo ait rendu sa 1ère frame réelle
+                // ── Permanent thumbnail in background ────────────────────────
+                // Visible until the video renders its first real frame
                 if let img = image {
                     Image(nsImage: img)
                         .resizable()
@@ -352,16 +352,16 @@ private struct ApercuFichierVideo: View {
                     ProgressView()
                 }
 
-                // ── Lecteur — visible seulement après la 1ère frame ───────────
-                if let lect = lecteur {
-                    VueAVPlayer(lecteur: lect)
+                // ── Player — visible only after the first frame ───────────────
+                if let currentPlayer = player {
+                    AVPlayerView(player: currentPlayer)
                         .frame(width: geo.size.width, height: geo.size.height)
                         .clipShape(RoundedRectangle(cornerRadius: 12))
-                        .opacity(videoPreteAfficher ? 1 : 0)
+                        .opacity(videoReadyToShow ? 1 : 0)
                 }
 
-                // ── Icône play (uniquement hors lecture) ──────────────────────
-                if lecteur == nil {
+                // ── Play icon (shown when not playing) ───────────────────────
+                if player == nil {
                     ZStack {
                         Circle()
                             .fill(.ultraThinMaterial)
@@ -373,18 +373,18 @@ private struct ApercuFichierVideo: View {
                     }
                 }
 
-                // ── Bouton mute/unmute (visible uniquement pendant la lecture) ─
-                if lecteur != nil {
+                // ── Mute/unmute button (visible only during playback) ─────────
+                if player != nil {
                     VStack {
                         HStack {
                             Spacer()
                             Button {
-                                if let lect = lecteur {
-                                    lect.isMuted.toggle()
-                                    estSilence.toggle()
+                                if let currentPlayer = player {
+                                    currentPlayer.isMuted.toggle()
+                                    isMuted.toggle()
                                 }
                             } label: {
-                                Image(systemName: estSilence ? "speaker.slash.fill" : "speaker.wave.2.fill")
+                                Image(systemName: isMuted ? "speaker.slash.fill" : "speaker.wave.2.fill")
                                     .font(.system(size: 11, weight: .semibold))
                                     .foregroundStyle(.white)
                                     .frame(width: 28, height: 28)
@@ -399,95 +399,95 @@ private struct ApercuFichierVideo: View {
             }
             .frame(width: geo.size.width, height: geo.size.height)
             .onTapGesture {
-                if lecteur == nil {
-                    let lect = AVPlayer(url: url)
-                    lecteur = lect
-                    lect.play()
-                    // Afficher le player dès qu'il commence vraiment à jouer
-                    observerPremiereLecture(lect)
+                if player == nil {
+                    let newPlayer = AVPlayer(url: url)
+                    player = newPlayer
+                    newPlayer.play()
+                    // Show the player as soon as it actually starts playing
+                    observeFirstPlayback(newPlayer)
                 } else {
-                    if lecteur?.timeControlStatus == .playing {
-                        lecteur?.pause()
+                    if player?.timeControlStatus == .playing {
+                        player?.pause()
                     } else {
-                        lecteur?.play()
+                        player?.play()
                     }
                 }
             }
-            .onAppear { charger(taille: geo.size) }
+            .onAppear { load(size: geo.size) }
             .onChange(of: url) {
-                lecteur = nil
-                videoPreteAfficher = false
-                charger(taille: geo.size)
+                player = nil
+                videoReadyToShow = false
+                load(size: geo.size)
             }
         }
         .padding(8)
     }
 
-    /// Surveille timeControlStatus : dès que le player joue réellement (1ère frame affichée),
-    /// on rend le lecteur visible. Sondage léger toutes les 50 ms, s'arrête dès succès.
-    private func observerPremiereLecture(_ lect: AVPlayer) {
-        var tentatives = 0
-        func verifier() {
-            guard tentatives < 40 else { return }   // timeout 2 s
-            tentatives += 1
-            if lect.timeControlStatus == .playing {
-                DispatchQueue.main.async { videoPreteAfficher = true }
+    /// Watches timeControlStatus: as soon as the player is truly playing (first frame shown),
+    /// the player is made visible. Light polling every 50 ms, stops on success.
+    private func observeFirstPlayback(_ currentPlayer: AVPlayer) {
+        var attempts = 0
+        func check() {
+            guard attempts < 40 else { return }   // 2 s timeout
+            attempts += 1
+            if currentPlayer.timeControlStatus == .playing {
+                DispatchQueue.main.async { videoReadyToShow = true }
             } else {
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { verifier() }
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { check() }
             }
         }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { verifier() }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { check() }
     }
 
-    /// Décode la miniature au plus à la taille réelle de la vue — jamais en 4K.
-    private func charger(taille: CGSize) {
-        guard lecteur == nil else { return }
+    /// Decodes the thumbnail at most to the actual view size — never in 4K.
+    private func load(size: CGSize) {
+        guard player == nil else { return }
         let scale = NSScreen.main?.backingScaleFactor ?? 2
-        let maxPx = max(taille.width, taille.height, 1) * scale
+        let maxPx  = max(size.width, size.height, 1) * scale
         DispatchQueue.global(qos: .userInitiated).async {
-            let img = MiniatureVideoURL.extraireFramePublic(de: url, tailleMax: maxPx)
+            let img = VideoThumbnailURL.extractFramePublic(from: url, maxSize: maxPx)
             DispatchQueue.main.async { image = img }
         }
     }
 }
 
-// MARK: - Aperçu QuickLook réel (QLPreviewView) pour docx, pages, psd, xlsx, pptx, keynote…
+// MARK: - Real QuickLook preview (QLPreviewView) for docx, pages, psd, xlsx, pptx, keynote…
 
-private struct ApercuQuickLook: NSViewRepresentable {
+private struct QuickLookPreview: NSViewRepresentable {
     let url: URL
 
     func makeNSView(context: Context) -> QLPreviewView {
-        let vue = QLPreviewView(frame: .zero, style: .normal)!
-        vue.autostarts  = true
-        vue.shouldCloseWithWindow = false
-        vue.previewItem = url as QLPreviewItem
-        return vue
+        let view = QLPreviewView(frame: .zero, style: .normal)!
+        view.autostarts  = true
+        view.shouldCloseWithWindow = false
+        view.previewItem = url as QLPreviewItem
+        return view
     }
 
-    func updateNSView(_ vue: QLPreviewView, context: Context) {
-        if vue.previewItem as? URL != url {
-            vue.previewItem = url as QLPreviewItem
+    func updateNSView(_ view: QLPreviewView, context: Context) {
+        if view.previewItem as? URL != url {
+            view.previewItem = url as QLPreviewItem
         }
     }
 }
 
-// MARK: - Contenu d'une archive (zip / tar / gz / 7z…)
+// MARK: - Archive contents (zip / tar / gz / 7z…)
 
-private struct ApercuArchive: View {
+private struct ArchivePreview: View {
     let url: URL
-    @State private var entrees: [String] = []
-    @State private var tronque: Bool = false
-    @State private var echec: Bool = false
+    @State private var entries:   [String] = []
+    @State private var truncated: Bool     = false
+    @State private var failed:    Bool     = false
 
     var body: some View {
         Group {
-            if echec {
-                ApercuFichierNonSupporte(url: url)
-            } else if entrees.isEmpty {
+            if failed {
+                UnsupportedFilePreview(url: url)
+            } else if entries.isEmpty {
                 ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 VStack(alignment: .leading, spacing: 0) {
-                    // En-tête
+                    // Header
                     HStack(spacing: 8) {
                         Image(systemName: "archivebox.fill")
                             .font(.system(size: 13, weight: .medium))
@@ -509,13 +509,13 @@ private struct ApercuArchive: View {
 
                     ScrollView {
                         LazyVStack(alignment: .leading, spacing: 1) {
-                            ForEach(entrees, id: \.self) { entree in
+                            ForEach(entries, id: \.self) { entry in
                                 HStack(spacing: 7) {
-                                    Image(systemName: entree.hasSuffix("/") ? "folder.fill" : iconeEntreeArchive(entree))
+                                    Image(systemName: entry.hasSuffix("/") ? "folder.fill" : archiveEntryIcon(entry))
                                         .font(.system(size: 11))
-                                        .foregroundStyle(couleurEntreeArchive(entree))
+                                        .foregroundStyle(archiveEntryColor(entry))
                                         .frame(width: 16)
-                                    Text(entree)
+                                    Text(entry)
                                         .font(.system(size: 11, design: .monospaced))
                                         .foregroundStyle(.primary)
                                         .lineLimit(1)
@@ -523,7 +523,7 @@ private struct ApercuArchive: View {
                                 .padding(.horizontal, 14)
                                 .padding(.vertical, 3)
                             }
-                            if tronque {
+                            if truncated {
                                 Text("…")
                                     .font(.system(size: 11))
                                     .foregroundStyle(.secondary)
@@ -535,31 +535,31 @@ private struct ApercuArchive: View {
                 }
             }
         }
-        .onAppear { listerContenu() }
-        .onChange(of: url) { listerContenu() }
+        .onAppear { listContents() }
+        .onChange(of: url) { listContents() }
     }
 
-    private func listerContenu() {
-        entrees = []; echec = false; tronque = false
+    private func listContents() {
+        entries = []; failed = false; truncated = false
         let ext = url.pathExtension.lowercased()
         DispatchQueue.global(qos: .userInitiated).async {
-            var lignes: [String] = []
-            var coupe = false
+            var lines: [String] = []
+            var isTruncated = false
 
-            // ZIP et formats compatibles unzip
+            // ZIP and unzip-compatible formats
             if ["zip","docx","xlsx","pptx","pages","numbers","key","jar","ipa","apk","odt"].contains(ext) {
                 let task = Process()
                 task.executableURL = URL(fileURLWithPath: "/usr/bin/unzip")
                 task.arguments = ["-l", url.path]
                 let pipe = Pipe()
                 task.standardOutput = pipe
-                task.standardError = Pipe()
+                task.standardError  = Pipe()
                 try? task.run(); task.waitUntilExit()
-                let sortie = String(data: pipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
-                lignes = sortie.components(separatedBy: "\n")
-                    .dropFirst(3).dropLast(2)          // supprimer l'en-tête et le total
-                    .compactMap { ligne -> String? in
-                        let cols = ligne.split(separator: " ", maxSplits: 4, omittingEmptySubsequences: true)
+                let output = String(data: pipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+                lines = output.components(separatedBy: "\n")
+                    .dropFirst(3).dropLast(2)          // remove header and total
+                    .compactMap { line -> String? in
+                        let cols = line.split(separator: " ", maxSplits: 4, omittingEmptySubsequences: true)
                         guard cols.count >= 4 else { return nil }
                         return String(cols[3])
                     }
@@ -575,9 +575,9 @@ private struct ApercuArchive: View {
                 task.arguments = args
                 let pipe = Pipe()
                 task.standardOutput = pipe
-                task.standardError = Pipe()
+                task.standardError  = Pipe()
                 try? task.run(); task.waitUntilExit()
-                lignes = (String(data: pipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? "")
+                lines = (String(data: pipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? "")
                     .components(separatedBy: "\n").filter { !$0.isEmpty }
             }
             // 7z / RAR
@@ -588,32 +588,32 @@ private struct ApercuArchive: View {
                 task.arguments = ["l", url.path]
                 let pipe = Pipe()
                 task.standardOutput = pipe
-                task.standardError = Pipe()
+                task.standardError  = Pipe()
                 try? task.run(); task.waitUntilExit()
-                let sortie = String(data: pipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
-                lignes = sortie.components(separatedBy: "\n")
-                    .compactMap { ligne -> String? in
-                        let cols = ligne.split(separator: " ", omittingEmptySubsequences: true)
-                        guard cols.count >= 5, ligne.contains("-") || ligne.contains("D") else { return nil }
+                let output = String(data: pipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+                lines = output.components(separatedBy: "\n")
+                    .compactMap { line -> String? in
+                        let cols = line.split(separator: " ", omittingEmptySubsequences: true)
+                        guard cols.count >= 5, line.contains("-") || line.contains("D") else { return nil }
                         return cols.dropFirst(4).joined(separator: " ")
                     }
             }
 
-            if lignes.count > 200 { coupe = true; lignes = Array(lignes.prefix(200)) }
-            if lignes.isEmpty { DispatchQueue.main.async { echec = true }; return }
-            DispatchQueue.main.async { entrees = lignes; tronque = coupe }
+            if lines.count > 200 { isTruncated = true; lines = Array(lines.prefix(200)) }
+            if lines.isEmpty { DispatchQueue.main.async { failed = true }; return }
+            DispatchQueue.main.async { entries = lines; truncated = isTruncated }
         }
     }
 
-    private func iconeEntreeArchive(_ nom: String) -> String {
-        if nom.hasSuffix("/") { return "folder.fill" }
-        let ext = (nom as NSString).pathExtension.lowercased()
+    private func archiveEntryIcon(_ name: String) -> String {
+        if name.hasSuffix("/") { return "folder.fill" }
+        let ext = (name as NSString).pathExtension.lowercased()
         switch ext {
         case "swift","py","js","ts","rb","go","rs","kt","java","c","cpp","h","m": return "chevron.left.forwardslash.chevron.right"
         case "png","jpg","jpeg","gif","webp","tiff","heic","svg":                  return "photo"
         case "mp4","mov","avi","mkv":                                              return "film"
         case "mp3","aac","wav","flac","m4a":                                       return "music.note"
-        case "pdf":                                                                 return "doc.richtext"
+        case "pdf":                                                                return "doc.richtext"
         case "json","yaml","yml","xml","toml":                                     return "curlybraces"
         case "txt","md","markdown":                                                return "doc.plaintext"
         case "zip","gz","tar","7z","rar":                                          return "archivebox"
@@ -621,9 +621,9 @@ private struct ApercuArchive: View {
         }
     }
 
-    private func couleurEntreeArchive(_ nom: String) -> Color {
-        if nom.hasSuffix("/") { return Color(red: 0.30, green: 0.60, blue: 0.95) }
-        let ext = (nom as NSString).pathExtension.lowercased()
+    private func archiveEntryColor(_ name: String) -> Color {
+        if name.hasSuffix("/") { return Color(red: 0.30, green: 0.60, blue: 0.95) }
+        let ext = (name as NSString).pathExtension.lowercased()
         switch ext {
         case "swift":                              return Color(red: 0.20, green: 0.78, blue: 0.35)
         case "png","jpg","jpeg","gif","webp","heic": return Color(red: 0.75, green: 0.35, blue: 0.90)
@@ -642,20 +642,20 @@ private extension URL {
     }
 }
 
-// MARK: - Repli : icône de fichier + nom pour les types vraiment non supportés
-private struct ApercuFichierNonSupporte: View {
+// MARK: - Fallback: file icon + name for unsupported types
+private struct UnsupportedFilePreview: View {
     let url: URL
 
     var body: some View {
         let ext = url.pathExtension.lowercased()
         VStack(spacing: 16) {
-            VueIconeFichier(ext: ext, taille: 90, rayon: 24, taillePolice: 38)
+            FileIconView(ext: ext, size: 90, radius: 24, fontSize: 38)
             Text(url.deletingPathExtension().lastPathComponent)
                 .font(.system(size: 13, weight: .medium))
                 .foregroundStyle(.primary)
                 .multilineTextAlignment(.center)
                 .padding(.horizontal, 16)
-            Text(L.fichier(ext: url.pathExtension.uppercased()))
+            Text(L.file(ext: url.pathExtension.uppercased()))
                 .font(.system(size: 11))
                 .foregroundStyle(.secondary)
         }
@@ -663,41 +663,41 @@ private struct ApercuFichierNonSupporte: View {
     }
 }
 
-/// Distributeur : choisit l'aperçu adapté selon l'extension du fichier.
-private struct ApercuFichier: View {
+/// Dispatcher: chooses the appropriate preview based on file extension.
+private struct FilePreview: View {
     let url: URL
 
     private var ext: String { url.pathExtension.lowercased() }
 
-    private static let extensionsTexte: Set<String> = [
+    private static let textExtensions: Set<String> = [
         "txt","md","markdown","swift","py","js","ts","jsx","tsx",
         "html","htm","css","scss","sass","less",
         "json","xml","yaml","yml","toml","ini","cfg","conf",
         "sh","bash","zsh","fish","rb","php","go","rs","kt","java","c","cpp","h","m"
     ]
-    static let extensionsImage: Set<String> = [
+    static let imageExtensions: Set<String> = [
         "png","jpg","jpeg","gif","webp","tiff","tif","bmp","heic","heif","svg"
     ]
-    static let extensionsVideo: Set<String> = [
+    static let videoExtensions: Set<String> = [
         "mp4","mov","avi","mkv","m4v","wmv","flv","webm"
     ]
-    /// Formats riches affichés via QLPreviewView (aperçu réel fidèle au document).
-    private static let extensionsQL: Set<String> = [
+    /// Rich formats displayed via QLPreviewView (faithful document preview).
+    private static let quickLookExtensions: Set<String> = [
         // Apple iWork
         "pages","numbers","key",
         // Microsoft Office
         "docx","doc","xlsx","xls","pptx","ppt","odt","ods","odp","rtf",
         // Adobe
         "psd","ai","indd","eps",
-        // Sketch / Figma / autres
+        // Sketch / Figma / others
         "sketch",
-        // ePub / livres
+        // ePub / books
         "epub",
         // Audio
         "mp3","aac","wav","flac","m4a","aiff","ogg"
     ]
-    /// Archives dont on affiche le contenu textuellement.
-    private static let extensionsArchive: Set<String> = [
+    /// Archives whose contents are displayed as a text list.
+    private static let archiveExtensions: Set<String> = [
         "zip","tar","gz","tgz","bz2","xz","rar","7z",
         "jar","ipa","apk"
     ]
@@ -705,290 +705,290 @@ private struct ApercuFichier: View {
     var body: some View {
         Group {
             if ext == "pdf" {
-                ApercuPDFPages(url: url)
-            } else if Self.extensionsTexte.contains(ext) {
-                ApercuFichierTexte(url: url)
-            } else if Self.extensionsImage.contains(ext) {
-                ApercuFichierImage(url: url)
-            } else if Self.extensionsVideo.contains(ext) {
-                ApercuFichierVideo(url: url)
-            } else if Self.extensionsQL.contains(ext) {
-                ApercuQuickLook(url: url)
+                PDFPagesPreview(url: url)
+            } else if Self.textExtensions.contains(ext) {
+                TextFilePreview(url: url)
+            } else if Self.imageExtensions.contains(ext) {
+                ImageFilePreview(url: url)
+            } else if Self.videoExtensions.contains(ext) {
+                VideoFilePreview(url: url)
+            } else if Self.quickLookExtensions.contains(ext) {
+                QuickLookPreview(url: url)
                     .clipShape(RoundedRectangle(cornerRadius: 12))
-            } else if Self.extensionsArchive.contains(ext) {
-                ApercuArchive(url: url)
+            } else if Self.archiveExtensions.contains(ext) {
+                ArchivePreview(url: url)
                     .clipShape(RoundedRectangle(cornerRadius: 12))
                     .background(Color.secondary.opacity(0.06), in: RoundedRectangle(cornerRadius: 12))
             } else {
-                ApercuFichierNonSupporte(url: url)
+                UnsupportedFilePreview(url: url)
             }
         }
     }
 }
 
 
-// MARK: - Helper icône + couleur par type de fichier
+// MARK: - File icon and color helper
 
-/// Représentation d'une icône de fichier : soit un SF Symbol, soit un badge texte coloré (style Adobe).
-enum IconeFichier {
-    case symbole(String, Color)
-    case badge(String, couleurFond: Color, couleurTexte: Color)
+/// Representation of a file icon: either an SF Symbol or a colored text badge (Adobe-style).
+enum FileIcon {
+    case symbol(String, Color)
+    case badge(String, backgroundColor: Color, textColor: Color)
 }
 
-private func iconeFichier(ext: String) -> IconeFichier {
+private func fileIcon(ext: String) -> FileIcon {
     switch ext {
 
     // ── PDF ──────────────────────────────────────────────────────────────────
     case "pdf":
-        return .symbole("doc.richtext.fill", Color(red: 0.90, green: 0.15, blue: 0.10))
+        return .symbol("doc.richtext.fill", Color(red: 0.90, green: 0.15, blue: 0.10))
 
-    // ── Suite Adobe ──────────────────────────────────────────────────────────
-    // Photoshop — fond sombre #001E36, lettres bleu vif #31A8FF (fidèle à l'icône officielle)
+    // ── Adobe suite ──────────────────────────────────────────────────────────
+    // Photoshop — dark bg #001E36, bright blue letters #31A8FF (matches official icon)
     case "psd", "psb":
-        return .badge("Ps", couleurFond: Color(red: 0.00, green: 0.12, blue: 0.21),
-                           couleurTexte: Color(red: 0.19, green: 0.66, blue: 1.00))
-    // Illustrator — fond sombre #330000, lettres orange vif #FF9A00
+        return .badge("Ps", backgroundColor: Color(red: 0.00, green: 0.12, blue: 0.21),
+                           textColor: Color(red: 0.19, green: 0.66, blue: 1.00))
+    // Illustrator — dark bg #330000, bright orange letters #FF9A00
     case "ai":
-        return .badge("Ai", couleurFond: Color(red: 0.20, green: 0.07, blue: 0.00),
-                           couleurTexte: Color(red: 1.00, green: 0.60, blue: 0.00))
-    // InDesign — fond sombre #49021F, lettres rose vif #FF3366
+        return .badge("Ai", backgroundColor: Color(red: 0.20, green: 0.07, blue: 0.00),
+                           textColor: Color(red: 1.00, green: 0.60, blue: 0.00))
+    // InDesign — dark bg #49021F, bright pink letters #FF3366
     case "indd", "indb", "indt":
-        return .badge("Id", couleurFond: Color(red: 0.29, green: 0.01, blue: 0.12),
-                           couleurTexte: Color(red: 1.00, green: 0.20, blue: 0.40))
-    // Premiere Pro — fond sombre #00005B, lettres violet clair #9999FF
+        return .badge("Id", backgroundColor: Color(red: 0.29, green: 0.01, blue: 0.12),
+                           textColor: Color(red: 1.00, green: 0.20, blue: 0.40))
+    // Premiere Pro — dark bg #00005B, light purple letters #9999FF
     case "prproj":
-        return .badge("Pr", couleurFond: Color(red: 0.00, green: 0.00, blue: 0.36),
-                           couleurTexte: Color(red: 0.60, green: 0.60, blue: 1.00))
-    // After Effects — fond sombre #1A0050, lettres violet électrique #9999FF
+        return .badge("Pr", backgroundColor: Color(red: 0.00, green: 0.00, blue: 0.36),
+                           textColor: Color(red: 0.60, green: 0.60, blue: 1.00))
+    // After Effects — dark bg #1A0050, electric purple letters #9999FF
     case "aep", "aet":
-        return .badge("Ae", couleurFond: Color(red: 0.10, green: 0.00, blue: 0.31),
-                           couleurTexte: Color(red: 0.60, green: 0.60, blue: 1.00))
-    // XD — fond sombre #2B0040, lettres rose vif #FF61F6
+        return .badge("Ae", backgroundColor: Color(red: 0.10, green: 0.00, blue: 0.31),
+                           textColor: Color(red: 0.60, green: 0.60, blue: 1.00))
+    // XD — dark bg #2B0040, bright pink letters #FF61F6
     case "xd":
-        return .badge("Xd", couleurFond: Color(red: 0.17, green: 0.00, blue: 0.25),
-                           couleurTexte: Color(red: 1.00, green: 0.38, blue: 0.96))
-    // Lightroom Classic — fond sombre #001122, lettres bleu Adobe #31A8FF
+        return .badge("Xd", backgroundColor: Color(red: 0.17, green: 0.00, blue: 0.25),
+                           textColor: Color(red: 1.00, green: 0.38, blue: 0.96))
+    // Lightroom Classic — dark bg #001122, Adobe blue letters #31A8FF
     case "lrcat", "lrtemplate", "lrsmcol":
-        return .badge("Lr", couleurFond: Color(red: 0.00, green: 0.07, blue: 0.13),
-                           couleurTexte: Color(red: 0.19, green: 0.66, blue: 1.00))
-    // Animate — fond sombre #1A0800, lettres orange vif #ED6B25
+        return .badge("Lr", backgroundColor: Color(red: 0.00, green: 0.07, blue: 0.13),
+                           textColor: Color(red: 0.19, green: 0.66, blue: 1.00))
+    // Animate — dark bg #1A0800, bright orange letters #ED6B25
     case "fla", "xfl":
-        return .badge("An", couleurFond: Color(red: 0.10, green: 0.03, blue: 0.00),
-                           couleurTexte: Color(red: 0.93, green: 0.42, blue: 0.15))
-    // Audition — fond sombre #001219, lettres cyan vif #00E4BB
+        return .badge("An", backgroundColor: Color(red: 0.10, green: 0.03, blue: 0.00),
+                           textColor: Color(red: 0.93, green: 0.42, blue: 0.15))
+    // Audition — dark bg #001219, bright cyan letters #00E4BB
     case "sesx":
-        return .badge("Au", couleurFond: Color(red: 0.00, green: 0.07, blue: 0.10),
-                           couleurTexte: Color(red: 0.00, green: 0.89, blue: 0.73))
-    // Dimension — fond sombre #001A3A, lettres bleu vif #4DAEFF
+        return .badge("Au", backgroundColor: Color(red: 0.00, green: 0.07, blue: 0.10),
+                           textColor: Color(red: 0.00, green: 0.89, blue: 0.73))
+    // Dimension — dark bg #001A3A, bright blue letters #4DAEFF
     case "dn":
-        return .badge("Dn", couleurFond: Color(red: 0.00, green: 0.10, blue: 0.23),
-                           couleurTexte: Color(red: 0.30, green: 0.68, blue: 1.00))
+        return .badge("Dn", backgroundColor: Color(red: 0.00, green: 0.10, blue: 0.23),
+                           textColor: Color(red: 0.30, green: 0.68, blue: 1.00))
 
     // ── Figma ────────────────────────────────────────────────────────────────
-    // Figma — violet/rose officiel
+    // Figma — official purple/pink
     case "fig":
-        return .badge("Fig", couleurFond: Color(red: 0.65, green: 0.35, blue: 1.00),
-                             couleurTexte: .white)
+        return .badge("Fig", backgroundColor: Color(red: 0.65, green: 0.35, blue: 1.00),
+                             textColor: .white)
 
     // ── Sketch ───────────────────────────────────────────────────────────────
-    // Sketch — jaune officiel
+    // Sketch — official yellow
     case "sketch":
-        return .badge("Sk", couleurFond: Color(red: 0.98, green: 0.73, blue: 0.17),
-                           couleurTexte: Color(red: 0.15, green: 0.12, blue: 0.00))
+        return .badge("Sk", backgroundColor: Color(red: 0.98, green: 0.73, blue: 0.17),
+                           textColor: Color(red: 0.15, green: 0.12, blue: 0.00))
 
     // ── Blender / 3D ─────────────────────────────────────────────────────────
     case "blend", "blend1":
-        return .badge("Bl", couleurFond: Color(red: 1.00, green: 0.46, blue: 0.07),
-                           couleurTexte: .white)
+        return .badge("Bl", backgroundColor: Color(red: 1.00, green: 0.46, blue: 0.07),
+                           textColor: .white)
     case "fbx":
-        return .badge("FBX", couleurFond: Color(red: 0.20, green: 0.55, blue: 0.85),
-                             couleurTexte: .white)
+        return .badge("FBX", backgroundColor: Color(red: 0.20, green: 0.55, blue: 0.85),
+                             textColor: .white)
     case "obj":
-        return .badge("OBJ", couleurFond: Color(red: 0.45, green: 0.45, blue: 0.50),
-                             couleurTexte: .white)
+        return .badge("OBJ", backgroundColor: Color(red: 0.45, green: 0.45, blue: 0.50),
+                             textColor: .white)
     case "stl":
-        return .badge("STL", couleurFond: Color(red: 0.22, green: 0.68, blue: 0.72),
-                             couleurTexte: .white)
+        return .badge("STL", backgroundColor: Color(red: 0.22, green: 0.68, blue: 0.72),
+                             textColor: .white)
     case "gltf", "glb":
-        return .badge("glTF", couleurFond: Color(red: 0.53, green: 0.34, blue: 0.82),
-                              couleurTexte: .white)
+        return .badge("glTF", backgroundColor: Color(red: 0.53, green: 0.34, blue: 0.82),
+                              textColor: .white)
 
-    // ── Bases de données ─────────────────────────────────────────────────────
+    // ── Databases ────────────────────────────────────────────────────────────
     case "db", "sqlite", "sqlite3", "db3":
-        return .symbole("cylinder.fill", Color(red: 0.40, green: 0.44, blue: 0.52))
+        return .symbol("cylinder.fill", Color(red: 0.40, green: 0.44, blue: 0.52))
     case "sql":
-        return .badge("SQL", couleurFond: Color(red: 0.25, green: 0.48, blue: 0.72),
-                             couleurTexte: .white)
+        return .badge("SQL", backgroundColor: Color(red: 0.25, green: 0.48, blue: 0.72),
+                             textColor: .white)
 
-    // ── Certificats / sécurité ────────────────────────────────────────────────
+    // ── Certificates / security ───────────────────────────────────────────────
     case "pem", "p12", "pfx", "cer", "crt":
-        return .symbole("lock.shield.fill", Color(red: 0.18, green: 0.62, blue: 0.28))
+        return .symbol("lock.shield.fill", Color(red: 0.18, green: 0.62, blue: 0.28))
 
-    // ── Exécutables / paquets macOS ───────────────────────────────────────────
+    // ── Executables / macOS packages ──────────────────────────────────────────
     case "dmg":
-        return .symbole("opticaldisc.fill", Color(red: 0.50, green: 0.52, blue: 0.56))
+        return .symbol("opticaldisc.fill", Color(red: 0.50, green: 0.52, blue: 0.56))
     case "pkg":
-        return .symbole("shippingbox.fill", Color(red: 0.55, green: 0.38, blue: 0.18))
+        return .symbol("shippingbox.fill", Color(red: 0.55, green: 0.38, blue: 0.18))
     case "app":
-        return .symbole("app.fill", Color(red: 0.25, green: 0.50, blue: 0.92))
+        return .symbol("app.fill", Color(red: 0.25, green: 0.50, blue: 0.92))
 
-    // ── Livres numériques ─────────────────────────────────────────────────────
+    // ── E-books ───────────────────────────────────────────────────────────────
     case "epub":
-        return .symbole("book.fill", Color(red: 0.15, green: 0.58, blue: 0.30))
+        return .symbol("book.fill", Color(red: 0.15, green: 0.58, blue: 0.30))
     case "mobi", "azw", "azw3":
-        return .symbole("book.closed.fill", Color(red: 0.12, green: 0.50, blue: 0.25))
+        return .symbol("book.closed.fill", Color(red: 0.12, green: 0.50, blue: 0.25))
 
-    // ── CAO / plans ──────────────────────────────────────────────────────────
+    // ── CAD / blueprints ──────────────────────────────────────────────────────
     case "dwg", "dxf":
-        return .badge("DWG", couleurFond: Color(red: 0.20, green: 0.38, blue: 0.62),
-                             couleurTexte: .white)
+        return .badge("DWG", backgroundColor: Color(red: 0.20, green: 0.38, blue: 0.62),
+                             textColor: .white)
     case "step", "stp", "iges", "igs":
-        return .badge("CAD", couleurFond: Color(red: 0.30, green: 0.45, blue: 0.65),
-                             couleurTexte: .white)
+        return .badge("CAD", backgroundColor: Color(red: 0.30, green: 0.45, blue: 0.65),
+                             textColor: .white)
 
-    // ── Swift / code source compilé ───────────────────────────────────────────
+    // ── Swift / compiled source code ──────────────────────────────────────────
     case "swift":
-        return .symbole("swift", Color(red: 0.20, green: 0.78, blue: 0.35))
+        return .symbol("swift", Color(red: 0.20, green: 0.78, blue: 0.35))
     case "c", "cpp", "h", "m", "mm":
-        return .symbole("hammer.fill", Color(red: 0.18, green: 0.70, blue: 0.30))
+        return .symbol("hammer.fill", Color(red: 0.18, green: 0.70, blue: 0.30))
     case "py":
-        return .symbole("chevron.left.forwardslash.chevron.right", Color(red: 0.22, green: 0.72, blue: 0.38))
+        return .symbol("chevron.left.forwardslash.chevron.right", Color(red: 0.22, green: 0.72, blue: 0.38))
     case "js", "ts", "jsx", "tsx":
-        return .symbole("function", Color(red: 0.25, green: 0.75, blue: 0.40))
+        return .symbol("function", Color(red: 0.25, green: 0.75, blue: 0.40))
     case "go":
-        return .symbole("arrow.trianglehead.2.counterclockwise.rotate.90", Color(red: 0.20, green: 0.76, blue: 0.65))
+        return .symbol("arrow.trianglehead.2.counterclockwise.rotate.90", Color(red: 0.20, green: 0.76, blue: 0.65))
     case "rs":
-        return .symbole("gear.badge", Color(red: 0.62, green: 0.35, blue: 0.10))
+        return .symbol("gear.badge", Color(red: 0.62, green: 0.35, blue: 0.10))
     case "kt", "kts":
-        return .symbole("k.circle.fill", Color(red: 0.45, green: 0.20, blue: 0.85))
+        return .symbol("k.circle.fill", Color(red: 0.45, green: 0.20, blue: 0.85))
     case "java":
-        return .symbole("cup.and.heat.waves.fill", Color(red: 0.80, green: 0.30, blue: 0.10))
+        return .symbol("cup.and.heat.waves.fill", Color(red: 0.80, green: 0.30, blue: 0.10))
     case "rb":
-        return .symbole("diamond.fill", Color(red: 0.85, green: 0.15, blue: 0.15))
+        return .symbol("diamond.fill", Color(red: 0.85, green: 0.15, blue: 0.15))
     case "php":
-        return .symbole("p.circle.fill", Color(red: 0.44, green: 0.46, blue: 0.80))
+        return .symbol("p.circle.fill", Color(red: 0.44, green: 0.46, blue: 0.80))
     case "dart":
-        return .badge("Dt", couleurFond: Color(red: 0.00, green: 0.57, blue: 0.80),
-                          couleurTexte: .white)
+        return .badge("Dt", backgroundColor: Color(red: 0.00, green: 0.57, blue: 0.80),
+                          textColor: .white)
     case "lua":
-        return .badge("Lua", couleurFond: Color(red: 0.18, green: 0.20, blue: 0.55),
-                             couleurTexte: .white)
+        return .badge("Lua", backgroundColor: Color(red: 0.18, green: 0.20, blue: 0.55),
+                             textColor: .white)
     case "r", "rmd":
-        return .badge("R", couleurFond: Color(red: 0.27, green: 0.48, blue: 0.72),
-                         couleurTexte: .white)
+        return .badge("R", backgroundColor: Color(red: 0.27, green: 0.48, blue: 0.72),
+                         textColor: .white)
 
     // ── HTML / CSS ────────────────────────────────────────────────────────────
     case "html", "htm":
-        return .symbole("globe", Color(red: 0.95, green: 0.45, blue: 0.05))
+        return .symbol("globe", Color(red: 0.95, green: 0.45, blue: 0.05))
     case "css", "scss", "sass", "less":
-        return .symbole("paintpalette.fill", Color(red: 0.95, green: 0.38, blue: 0.05))
+        return .symbol("paintpalette.fill", Color(red: 0.95, green: 0.38, blue: 0.05))
 
-    // ── JSON / YAML / config ─────────────────────────────────────────────────
+    // ── JSON / YAML / config ──────────────────────────────────────────────────
     case "json":
-        return .symbole("curlybraces", Color(red: 0.55, green: 0.20, blue: 0.90))
+        return .symbol("curlybraces", Color(red: 0.55, green: 0.20, blue: 0.90))
     case "yaml", "yml":
-        return .symbole("list.bullet.indent", Color(red: 0.50, green: 0.18, blue: 0.85))
+        return .symbol("list.bullet.indent", Color(red: 0.50, green: 0.18, blue: 0.85))
     case "toml", "ini", "cfg", "conf":
-        return .symbole("gearshape.fill", Color(red: 0.48, green: 0.18, blue: 0.80))
+        return .symbol("gearshape.fill", Color(red: 0.48, green: 0.18, blue: 0.80))
 
     // ── Shell / scripts ───────────────────────────────────────────────────────
     case "sh", "bash", "zsh", "fish":
-        return .symbole("terminal.fill", Color(red: 0.45, green: 0.48, blue: 0.52))
+        return .symbol("terminal.fill", Color(red: 0.45, green: 0.48, blue: 0.52))
 
     // ── Archives ─────────────────────────────────────────────────────────────
     case "zip", "tar", "gz", "bz2", "xz", "rar", "7z":
-        return .symbole("archivebox.fill", Color(red: 0.52, green: 0.34, blue: 0.20))
+        return .symbol("archivebox.fill", Color(red: 0.52, green: 0.34, blue: 0.20))
 
-    // ── Vidéo ─────────────────────────────────────────────────────────────────
+    // ── Video ─────────────────────────────────────────────────────────────────
     case "mp4", "mov", "avi", "mkv", "m4v", "wmv", "flv", "webm":
-        return .symbole("film.fill", Color(red: 0.10, green: 0.45, blue: 0.90))
+        return .symbol("film.fill", Color(red: 0.10, green: 0.45, blue: 0.90))
 
     // ── Audio ─────────────────────────────────────────────────────────────────
     case "mp3", "aac", "wav", "flac", "ogg", "m4a", "aiff":
-        return .symbole("music.note", Color(red: 0.90, green: 0.35, blue: 0.65))
+        return .symbol("music.note", Color(red: 0.90, green: 0.35, blue: 0.65))
 
-    // ── Tableur / Excel ───────────────────────────────────────────────────────
+    // ── Spreadsheet / Excel ───────────────────────────────────────────────────
     case "xlsx", "xls", "csv", "numbers":
-        return .symbole("tablecells.fill", Color(red: 0.10, green: 0.52, blue: 0.22))
+        return .symbol("tablecells.fill", Color(red: 0.10, green: 0.52, blue: 0.22))
 
-    // ── Traitement de texte / Word ────────────────────────────────────────────
+    // ── Word processing / Word ────────────────────────────────────────────────
     case "docx", "doc", "rtf", "odt":
-        return .symbole("doc.text.fill", Color(red: 0.10, green: 0.28, blue: 0.72))
+        return .symbol("doc.text.fill", Color(red: 0.10, green: 0.28, blue: 0.72))
 
     // ── Pages (Apple) ─────────────────────────────────────────────────────────
     case "pages":
-        return .symbole("doc.richtext", Color(red: 0.85, green: 0.70, blue: 0.05))
+        return .symbol("doc.richtext", Color(red: 0.85, green: 0.70, blue: 0.05))
 
     // ── PowerPoint / Keynote ──────────────────────────────────────────────────
     case "pptx", "ppt":
-        return .symbole("rectangle.on.rectangle.angled.fill", Color(red: 0.88, green: 0.30, blue: 0.05))
+        return .symbol("rectangle.on.rectangle.angled.fill", Color(red: 0.88, green: 0.30, blue: 0.05))
 
     // ── Keynote (Apple) ───────────────────────────────────────────────────────
     case "key":
-        return .symbole("rectangle.on.rectangle.angled.fill", Color(red: 0.10, green: 0.46, blue: 0.95))
+        return .symbol("rectangle.on.rectangle.angled.fill", Color(red: 0.10, green: 0.46, blue: 0.95))
 
-    // ── Texte brut / Markdown ─────────────────────────────────────────────────
+    // ── Plain text / Markdown ─────────────────────────────────────────────────
     case "txt":
-        return .symbole("doc.plaintext.fill", Color(red: 0.40, green: 0.44, blue: 0.50))
+        return .symbol("doc.plaintext.fill", Color(red: 0.40, green: 0.44, blue: 0.50))
     case "md", "markdown":
-        return .symbole("doc.text", Color(red: 0.40, green: 0.44, blue: 0.50))
+        return .symbol("doc.text", Color(red: 0.40, green: 0.44, blue: 0.50))
 
     // ── XML / SVG ─────────────────────────────────────────────────────────────
     case "xml":
-        return .symbole("angle.left.and.angle.right.and.dot.point", Color(red: 0.55, green: 0.22, blue: 0.88))
+        return .symbol("angle.left.and.angle.right.and.dot.point", Color(red: 0.55, green: 0.22, blue: 0.88))
     case "svg":
-        return .symbole("skew", Color(red: 0.95, green: 0.42, blue: 0.05))
+        return .symbol("skew", Color(red: 0.95, green: 0.42, blue: 0.05))
 
-    // ── Polices ───────────────────────────────────────────────────────────────
+    // ── Fonts ─────────────────────────────────────────────────────────────────
     case "ttf", "otf", "woff", "woff2":
-        return .symbole("textformat", Color(red: 0.60, green: 0.30, blue: 0.80))
+        return .symbol("textformat", Color(red: 0.60, green: 0.30, blue: 0.80))
 
-    // ── Repli ─────────────────────────────────────────────────────────────────
+    // ── Fallback ──────────────────────────────────────────────────────────────
     default:
-        return .symbole("doc.fill", Color(red: 0.40, green: 0.44, blue: 0.50))
+        return .symbol("doc.fill", Color(red: 0.40, green: 0.44, blue: 0.50))
     }
 }
 
-/// Compatibilité : retourne (sfSymbol, couleur) pour les anciens appels.
-/// Les badges utilisent un symbole générique ; la vue `VueIconeFichier` gère le rendu complet.
-private func iconeEtCouleurFichier(ext: String) -> (String, Color) {
-    switch iconeFichier(ext: ext) {
-    case .symbole(let s, let c): return (s, c)
-    case .badge(_, let fond, _): return ("doc.fill", fond)
+/// Compatibility: returns (sfSymbol, color) for legacy call sites.
+/// Badges use a generic symbol; FileIconView handles the full rendering.
+private func fileIconAndColor(ext: String) -> (String, Color) {
+    switch fileIcon(ext: ext) {
+    case .symbol(let s, let c):            return (s, c)
+    case .badge(_, let bgColor, _):        return ("doc.fill", bgColor)
     }
 }
 
-// MARK: - Vue d'icône fichier unifiée (symbole ou badge)
+// MARK: - Unified file icon view (symbol or badge)
 
-/// Remplace le ZStack inline dans LigneElementPressePapier et ApercuFichierNonSupporte.
-private struct VueIconeFichier: View {
+/// Replaces inline ZStacks in ClipboardItemRow and UnsupportedFilePreview.
+private struct FileIconView: View {
     let ext: String
-    /// Taille du conteneur carré (ex: 36 pour liste, 90 pour aperçu).
-    let taille: CGFloat
-    /// Rayon des coins (ex: 20 pour liste, 24 pour aperçu).
-    let rayon: CGFloat
-    /// Taille de la police de l'icône (ex: 15 pour liste, 38 pour aperçu).
-    let taillePolice: CGFloat
-    /// Si true, fond plus opaque + texte blanc (état sélectionné dans la liste).
-    var estSelectionne: Bool = false
+    /// Square container size (e.g. 36 for list, 90 for preview).
+    let size: CGFloat
+    /// Corner radius (e.g. 20 for list, 24 for preview).
+    let radius: CGFloat
+    /// Icon font size (e.g. 15 for list, 38 for preview).
+    let fontSize: CGFloat
+    /// If true, more opaque background + white text (selected state in list).
+    var isSelected: Bool = false
 
     @Environment(\.colorScheme) private var colorScheme
 
-    /// En mode clair les couleurs vives sur fond blanc deviennent invisibles à 0.18 d'opacité ;
-    /// on remonte l'opacité du fond et on assombrit l'icône avec un multiplicateur.
-    private var estClair: Bool { colorScheme == .light }
+    /// In light mode, vivid colors on a white background become invisible at 0.18 opacity;
+    /// we increase the background opacity and darken the icon with a multiplier.
+    private var isLight: Bool { colorScheme == .light }
 
-    /// Opacité du fond du symbole : plus forte en mode clair pour compenser le fond blanc.
-    private var opaciteFondSymbole: Double {
-        if estSelectionne { return 0.40 }
-        return estClair ? 0.16 : 0.18
+    /// Symbol background opacity: higher in light mode to compensate for the white background.
+    private var symbolBackgroundOpacity: Double {
+        if isSelected { return 0.40 }
+        return isLight ? 0.16 : 0.18
     }
 
-    /// La couleur de l'icône est assombrie en mode clair (×0.65 sur chaque composante)
-    /// pour rester lisible sur fond blanc.
-    private func couleurAdaptee(_ couleur: Color) -> Color {
-        guard estClair, !estSelectionne else { return couleur }
-        guard let components = NSColor(couleur).usingColorSpace(.sRGB) else { return couleur }
+    /// The icon color is darkened in light mode (×0.65 per component)
+    /// to remain legible on a white background.
+    private func adaptedColor(_ color: Color) -> Color {
+        guard isLight, !isSelected else { return color }
+        guard let components = NSColor(color).usingColorSpace(.sRGB) else { return color }
         return Color(
             red:   components.redComponent   * 0.62,
             green: components.greenComponent * 0.62,
@@ -997,39 +997,39 @@ private struct VueIconeFichier: View {
     }
 
     var body: some View {
-        let icone = iconeFichier(ext: ext)
+        let icon = fileIcon(ext: ext)
         ZStack {
-            switch icone {
-            case .symbole(let nom, let couleur):
-                let c = couleurAdaptee(couleur)
-                RoundedRectangle(cornerRadius: rayon)
-                    .fill(c.opacity(opaciteFondSymbole))
-                Image(systemName: nom)
-                    .font(.system(size: taillePolice, weight: .medium))
-                    .foregroundStyle(estSelectionne ? .white : c)
+            switch icon {
+            case .symbol(let name, let color):
+                let adapted = adaptedColor(color)
+                RoundedRectangle(cornerRadius: radius)
+                    .fill(adapted.opacity(symbolBackgroundOpacity))
+                Image(systemName: name)
+                    .font(.system(size: fontSize, weight: .medium))
+                    .foregroundStyle(isSelected ? .white : adapted)
 
-            case .badge(let texte, let fond, let couleurTexte):
-                // Les badges ont déjà un fond sombre opaque : on les laisse tels quels.
-                RoundedRectangle(cornerRadius: rayon)
-                    .fill(fond.opacity(estSelectionne ? 0.85 : 0.92))
-                Text(texte)
-                    .font(.system(size: taillePolice * 0.72, weight: .bold, design: .rounded))
-                    .foregroundStyle(estSelectionne ? .white : couleurTexte)
+            case .badge(let text, let bgColor, let labelColor):
+                // Badges already have an opaque dark background — left as-is.
+                RoundedRectangle(cornerRadius: radius)
+                    .fill(bgColor.opacity(isSelected ? 0.85 : 0.92))
+                Text(text)
+                    .font(.system(size: fontSize * 0.72, weight: .bold, design: .rounded))
+                    .foregroundStyle(isSelected ? .white : labelColor)
                     .minimumScaleFactor(0.5)
                     .lineLimit(1)
             }
         }
-        .frame(width: taille, height: taille)
+        .frame(width: size, height: size)
     }
 }
 
-// MARK: - Miniature URL fichier image
+// MARK: - Image file URL thumbnail
 
-private struct MiniatureFichierURL: View {
+private struct FileThumbnailURL: View {
     let url: URL
-    let chargerImmediatement: Bool
+    let loadImmediately: Bool
 
-    // Cache partagé entre toutes les instances
+    // Shared cache across all instances
     private static let cache = NSCache<NSURL, NSImage>()
 
     @State private var image: NSImage? = nil
@@ -1042,16 +1042,16 @@ private struct MiniatureFichierURL: View {
                     .aspectRatio(contentMode: .fill)
             } else {
                 Color.secondary.opacity(0.2)
-                    .overlay(chargerImmediatement ? AnyView(ProgressView().scaleEffect(0.5)) : AnyView(EmptyView()))
+                    .overlay(loadImmediately ? AnyView(ProgressView().scaleEffect(0.5)) : AnyView(EmptyView()))
             }
         }
-        .onAppear { if chargerImmediatement { charger() } }
-        .onChange(of: chargerImmediatement) { if chargerImmediatement { charger() } }
+        .onAppear { if loadImmediately { load() } }
+        .onChange(of: loadImmediately) { if loadImmediately { load() } }
     }
 
-    private func charger() {
+    private func load() {
         guard image == nil else { return }
-        // Vérifier le cache d'abord
+        // Check the cache first
         if let cached = Self.cache.object(forKey: url as NSURL) {
             image = cached
             return
@@ -1064,13 +1064,13 @@ private struct MiniatureFichierURL: View {
     }
 }
 
-// MARK: - Miniature vidéo (AVFoundation, lazy + cache partagé)
+// MARK: - Video thumbnail (AVFoundation, lazy + shared cache)
 
-private struct MiniatureVideoURL: View {
+private struct VideoThumbnailURL: View {
     let url: URL
-    let chargerImmediatement: Bool
+    let loadImmediately: Bool
 
-    // Cache partagé entre toutes les instances — même pattern que MiniatureFichierURL
+    // Shared cache across all instances — same pattern as FileThumbnailURL
     private static let cache = NSCache<NSURL, NSImage>()
 
     @State private var image: NSImage? = nil
@@ -1084,134 +1084,134 @@ private struct MiniatureVideoURL: View {
             } else {
                 ZStack {
                     Color.secondary.opacity(0.2)
-                    if chargerImmediatement {
+                    if loadImmediately {
                         ProgressView().scaleEffect(0.5)
                     }
                 }
             }
         }
-        .onAppear { if chargerImmediatement { charger() } }
-        .onChange(of: chargerImmediatement) { if chargerImmediatement { charger() } }
+        .onAppear { if loadImmediately { load() } }
+        .onChange(of: loadImmediately) { if loadImmediately { load() } }
     }
 
-    private func charger() {
+    private func load() {
         guard image == nil else { return }
-        // Cache en premier — aucun travail si déjà extrait
+        // Cache first — no work if already extracted
         if let cached = Self.cache.object(forKey: url as NSURL) {
             image = cached; return
         }
         DispatchQueue.global(qos: .utility).async {
-            guard let img = MiniatureVideoURL.extraireFrame(de: url) else { return }
+            guard let img = VideoThumbnailURL.extractFrame(from: url) else { return }
             Self.cache.setObject(img, forKey: url as NSURL)
             DispatchQueue.main.async { image = img }
         }
     }
 
-    /// Extrait la première frame exploitable (à t = 0.5 s ou t = 0 si fichier court).
-    /// Toute la charge est sur un background thread — jamais sur le main thread.
-    /// `tailleMax` : dimension maximale du côté le plus long en pixels physiques.
-    /// Passer 120 pour les miniatures de liste, la vraie taille de vue pour l'aperçu.
-    /// AVAssetImageGenerator ne décodera jamais plus de pixels que nécessaire.
-    static func extraireFramePublic(de url: URL, tailleMax: CGFloat = 120) -> NSImage? {
-        extraireFrame(de: url, tailleMax: tailleMax)
+    /// Extracts the first usable frame (at t = 0.5 s or t = 0 for short files).
+    /// All work is on a background thread — never on the main thread.
+    /// `maxSize`: maximum dimension of the longest side in physical pixels.
+    /// Pass 120 for list thumbnails, the actual view size for the preview.
+    /// AVAssetImageGenerator never decodes more pixels than necessary.
+    static func extractFramePublic(from url: URL, maxSize: CGFloat = 120) -> NSImage? {
+        extractFrame(from: url, maxSize: maxSize)
     }
 
-    private static func extraireFrame(de url: URL, tailleMax: CGFloat = 120) -> NSImage? {
+    private static func extractFrame(from url: URL, maxSize: CGFloat = 120) -> NSImage? {
         let asset = AVURLAsset(url: url, options: [AVURLAssetPreferPreciseDurationAndTimingKey: false])
-        let gen = AVAssetImageGenerator(asset: asset)
-        gen.appliesPreferredTrackTransform = true   // respecte la rotation de la vidéo
-        // Limiter le décodage à la taille réelle de la vue — jamais en pleine résolution.
-        // Une vidéo 4K dans une fenêtre de 400 px sera décodée en 400 px max, pas en 4K.
-        let cap = max(tailleMax, 1)
-        gen.maximumSize = CGSize(width: cap, height: cap)
-        gen.requestedTimeToleranceBefore = CMTime(seconds: 1, preferredTimescale: 600)
-        gen.requestedTimeToleranceAfter  = CMTime(seconds: 1, preferredTimescale: 600)
-        let temps = CMTime(seconds: 0.5, preferredTimescale: 600)
-        guard let cgImg = try? gen.copyCGImage(at: temps, actualTime: nil) else { return nil }
+        let generator = AVAssetImageGenerator(asset: asset)
+        generator.appliesPreferredTrackTransform = true   // respects video rotation
+        // Limit decoding to the actual view size — never full resolution.
+        // A 4K video in a 400 px window is decoded at 400 px max, not 4K.
+        let cap = max(maxSize, 1)
+        generator.maximumSize = CGSize(width: cap, height: cap)
+        generator.requestedTimeToleranceBefore = CMTime(seconds: 1, preferredTimescale: 600)
+        generator.requestedTimeToleranceAfter  = CMTime(seconds: 1, preferredTimescale: 600)
+        let time = CMTime(seconds: 0.5, preferredTimescale: 600)
+        guard let cgImg = try? generator.copyCGImage(at: time, actualTime: nil) else { return nil }
         return NSImage(cgImage: cgImg, size: .zero)
     }
 }
 
-// MARK: - Ligne d'élément
+// MARK: - Item row
 
-struct LigneElementPressePapier: View {
-    let element: ElementPressePapier
-    let estSelectionne: Bool
-    var indexSequence: Int? = nil
-    var chargerMiniature: Bool = true
-    let surTap: () -> Void
-    let surDoubleTap: () -> Void
+struct ClipboardItemRow: View {
+    let element: ClipboardItem
+    let isSelected: Bool
+    var sequenceIndex: Int? = nil
+    var loadThumbnail: Bool = true
+    let onTap: () -> Void
+    let onDoubleTap: () -> Void
 
-    @State private var estSurvole = false
+    @State private var isHovered = false
 
     var body: some View {
         HStack(spacing: 10) {
             Group {
-                if case .image(let img) = element.contenu {
+                if case .image(let img) = element.content {
                     Image(nsImage: img)
                         .resizable().aspectRatio(contentMode: .fill)
                         .frame(width: 36, height: 36)
                         .clipShape(RoundedRectangle(cornerRadius: 20))
-                } else if case .texte = element.contenu, let couleur = element.couleurCachee {
+                } else if case .text = element.content, let color = element.cachedColor {
                     RoundedRectangle(cornerRadius: 20)
-                        .fill(couleur)
+                        .fill(color)
                         .frame(width: 36, height: 36)
                         .overlay(RoundedRectangle(cornerRadius: 20).stroke(Color.primary.opacity(0.15), lineWidth: 0.5))
-                } else if case .urlFichier(let url) = element.contenu {
-                    let ext = url.pathExtension.lowercased()
-                    let estImageFichier = ApercuFichier.extensionsImage.contains(ext)
-                    let estVideoFichier = ApercuFichier.extensionsVideo.contains(ext)
-                    if estImageFichier {
-                        MiniatureFichierURL(url: url, chargerImmediatement: chargerMiniature)
+                } else if case .fileURL(let url) = element.content {
+                    let ext            = url.pathExtension.lowercased()
+                    let isImageFile    = FilePreview.imageExtensions.contains(ext)
+                    let isVideoFile    = FilePreview.videoExtensions.contains(ext)
+                    if isImageFile {
+                        FileThumbnailURL(url: url, loadImmediately: loadThumbnail)
                             .frame(width: 36, height: 36)
                             .clipShape(RoundedRectangle(cornerRadius: 20))
-                    } else if estVideoFichier {
-                        MiniatureVideoURL(url: url, chargerImmediatement: chargerMiniature)
+                    } else if isVideoFile {
+                        VideoThumbnailURL(url: url, loadImmediately: loadThumbnail)
                             .frame(width: 36, height: 36)
                             .clipShape(RoundedRectangle(cornerRadius: 20))
                     } else {
-                        VueIconeFichier(ext: ext, taille: 36, rayon: 20, taillePolice: 15,
-                                        estSelectionne: estSelectionne)
+                        FileIconView(ext: ext, size: 36, radius: 20, fontSize: 15,
+                                        isSelected: isSelected)
                     }
-                } else if case .texte(let t) = element.contenu, t.hasPrefix("http") || t.hasPrefix("www") {
+                } else if case .text(let t) = element.content, t.hasPrefix("http") || t.hasPrefix("www") {
                     ZStack {
                         RoundedRectangle(cornerRadius: 20)
-                            .fill(Color.blue.opacity(estSelectionne ? 0.4 : 0.2))
+                            .fill(Color.blue.opacity(isSelected ? 0.4 : 0.2))
                         Image(systemName: "globe.americas.fill")
                             .font(.system(size: 15, weight: .medium))
-                            .foregroundStyle(estSelectionne ? .white : Color.blue)
+                            .foregroundStyle(isSelected ? .white : Color.blue)
                     }
                     .frame(width: 36, height: 36)
                 } else {
                     ZStack {
                         RoundedRectangle(cornerRadius: 20)
-                            .fill(element.couleurType.opacity(estSelectionne ? 0.4 : 0.2))
-                        Image(systemName: element.iconeType)
+                            .fill(element.typeColor.opacity(isSelected ? 0.4 : 0.2))
+                        Image(systemName: element.typeIcon)
                             .font(.system(size: 15, weight: .medium))
-                            .foregroundStyle(estSelectionne ? .white : element.couleurType)
+                            .foregroundStyle(isSelected ? .white : element.typeColor)
                     }
                     .frame(width: 36, height: 36)
                 }
             }
 
             VStack(alignment: .leading, spacing: 2) {
-                Text(element.titreAffiche)
+                Text(element.displayTitle)
                     .font(.system(size: 12, weight: .medium)).lineLimit(1)
-                    .foregroundStyle(estSelectionne ? .white : .primary)
+                    .foregroundStyle(isSelected ? .white : .primary)
                 Group {
-                    if case .urlFichier(let url) = element.contenu, !url.pathExtension.isEmpty {
+                    if case .fileURL(let url) = element.content, !url.pathExtension.isEmpty {
                         Text(url.pathExtension.uppercased())
-                    } else if case .texte = element.contenu, element.couleurCachee != nil {
-                        Text(L.couleur)
+                    } else if case .text = element.content, element.cachedColor != nil {
+                        Text(L.color)
                     } else {
-                        Text(element.labelType)
+                        Text(element.typeLabel)
                     }
                 }
                 .font(.system(size: 10))
-                .foregroundStyle(estSelectionne ? .white.opacity(0.7) : .secondary)
+                .foregroundStyle(isSelected ? .white.opacity(0.7) : .secondary)
             }
             Spacer()
-            if let idx = indexSequence {
+            if let idx = sequenceIndex {
                 ZStack {
                     Circle().fill(Color.accentAttenuation).frame(width: 18, height: 18)
                     Text("\(idx)").font(.system(size: 10, weight: .bold, design: .rounded)).foregroundStyle(.white)
@@ -1222,147 +1222,147 @@ struct LigneElementPressePapier: View {
         .frame(maxWidth: .infinity)
         .background(
             RoundedRectangle(cornerRadius: 20).fill(
-                estSelectionne ? Color.accentAttenuation :
-                estSurvole  ? Color.primary.opacity(0.07) : Color.clear
+                isSelected ? Color.accentAttenuation :
+                isHovered  ? Color.primary.opacity(0.07) : Color.clear
             )
         )
         .contentShape(Rectangle())
-        .onHover { estSurvole = $0 }
-        .simultaneousGesture(TapGesture(count: 2).onEnded { surDoubleTap() })
-        .simultaneousGesture(TapGesture(count: 1).onEnded { surTap() })
-        .animation(.spring(response: 0.28, dampingFraction: 0.78), value: element.estEpingle)
+        .onHover { isHovered = $0 }
+        .simultaneousGesture(TapGesture(count: 2).onEnded { onDoubleTap() })
+        .simultaneousGesture(TapGesture(count: 1).onEnded { onTap() })
+        .animation(.spring(response: 0.28, dampingFraction: 0.78), value: element.isPinned)
     }
 }
 
-// MARK: - Logique bouton « confirmé » partagée
+// MARK: - Shared confirm button logic
 
-private struct BoutonConfirme<Etiquette: View>: View {
-    let texteAide: String
+private struct ConfirmButton<Label: View>: View {
+    let helpText: String
     let action: () -> Void
-    @ViewBuilder let etiquette: (Bool) -> Etiquette
+    @ViewBuilder let label: (Bool) -> Label
 
-    @State private var afficherConfirme = false
+    @State private var showConfirmed = false
 
     var body: some View {
         Button {
-            guard !afficherConfirme else { return }
+            guard !showConfirmed else { return }
             action()
-            withAnimation(.spring(response: 0.28, dampingFraction: 0.75)) { afficherConfirme = true }
+            withAnimation(.spring(response: 0.28, dampingFraction: 0.75)) { showConfirmed = true }
             DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
-                withAnimation { afficherConfirme = false }
+                withAnimation { showConfirmed = false }
             }
         } label: {
-            etiquette(afficherConfirme)
+            label(showConfirmed)
         }
         .buttonStyle(.plain)
-        .help(texteAide)
-        .disabled(afficherConfirme)
+        .help(helpText)
+        .disabled(showConfirmed)
     }
 }
 
-// MARK: - Boutons d'action
+// MARK: - Action buttons
 
-private struct BoutonActionAnime: View {
-    let titre: String
-    let icone: String?
-    let texteAide: String
-    let pleineLargeur: Bool
+private struct AnimatedActionButton: View {
+    let title: String
+    let icon: String?
+    let helpText: String
+    let fullWidth: Bool
     let action: () -> Void
 
-    @State private var estSurvole = false
+    @State private var isHovered = false
 
     var body: some View {
-        BoutonConfirme(texteAide: texteAide, action: action) { confirme in
+        ConfirmButton(helpText: helpText, action: action) { confirmed in
             ZStack {
-                // Contenu visible : icône seule en mode confirmé, icône + texte sinon
-                if confirme {
+                // Visible content: icon only when confirmed, icon + text otherwise
+                if confirmed {
                     Image(systemName: "checkmark.circle.fill")
                         .transition(.scale.combined(with: .opacity))
                 } else {
                     HStack(spacing: 6) {
-                        if let icone { Image(systemName: icone) }
-                        if !titre.isEmpty { Text(titre) }
+                        if let icon { Image(systemName: icon) }
+                        if !title.isEmpty { Text(title) }
                     }
                     .transition(.opacity)
                 }
             }
             .font(.system(size: 13, weight: .semibold))
             .foregroundStyle(.white)
-            // Hauteur fixe identique à BoutonSauvegardeImage pour éviter tout décalage layout
-            .frame(maxWidth: pleineLargeur ? .infinity : nil, minHeight: 34, maxHeight: 34)
-            .padding(.horizontal, pleineLargeur ? 0 : 12)
+            // Fixed height matching SaveImageButton to avoid layout shift
+            .frame(maxWidth: fullWidth ? .infinity : nil, minHeight: 34, maxHeight: 34)
+            .padding(.horizontal, fullWidth ? 0 : 12)
             .background(
-                confirme ? Color.green : (estSurvole ? Color.accentAttenuation.opacity(0.75) : Color.accentAttenuation),
+                confirmed ? Color.green : (isHovered ? Color.accentAttenuation.opacity(0.75) : Color.accentAttenuation),
                 in: RoundedRectangle(cornerRadius: 26)
             )
         }
-        .onHover { estSurvole = $0 }
+        .onHover { isHovered = $0 }
     }
 }
 
-private struct BoutonIconeSurvol: View {
-    let symbole: String
-    let couleur: Color
-    let texteAide: String
+private struct HoverIconButton: View {
+    let symbol: String
+    let color: Color
+    let helpText: String
     let action: () -> Void
 
-    @State private var estSurvole = false
-    @State private var estPresse  = false
+    @State private var isHovered  = false
+    @State private var isPressed  = false
 
-    // Rouge si la couleur passée est rouge (bouton supprimer)
-    private var estRouge: Bool { couleur == .red }
+    // Red if the passed color is red (delete button)
+    private var isRed: Bool { color == .red }
 
     var body: some View {
         Button {
-            withAnimation(.spring(response: 0.22, dampingFraction: 0.65)) { estPresse = true }
+            withAnimation(.spring(response: 0.22, dampingFraction: 0.65)) { isPressed = true }
             action()
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-                withAnimation(.spring(response: 0.28, dampingFraction: 0.75)) { estPresse = false }
+                withAnimation(.spring(response: 0.28, dampingFraction: 0.75)) { isPressed = false }
             }
         } label: {
-            Image(systemName: symbole)
+            Image(systemName: symbol)
                 .font(.system(size: 13, weight: .semibold))
-                .foregroundStyle(estRouge
+                .foregroundStyle(isRed
                     ? Color.red
-                    : (estSurvole ? Color.accentColor : Color.secondary))
+                    : (isHovered ? Color.accentColor : Color.secondary))
                 .frame(width: 36, height: 34)
                 .background(
-                    RoundedRectangle(cornerRadius: 26).fill(estRouge
-                        ? (estSurvole ? Color.red.opacity(0.15) : Color.primary.opacity(0.06))
-                        : (estSurvole ? Color.accentColor.opacity(0.12) : Color.primary.opacity(0.06)))
+                    RoundedRectangle(cornerRadius: 26).fill(isRed
+                        ? (isHovered ? Color.red.opacity(0.15) : Color.primary.opacity(0.06))
+                        : (isHovered ? Color.accentColor.opacity(0.12) : Color.primary.opacity(0.06)))
                 )
-                .animation(.spring(response: 0.28, dampingFraction: 0.78), value: estSurvole)
+                .animation(.spring(response: 0.28, dampingFraction: 0.78), value: isHovered)
         }
         .buttonStyle(.plain)
-        .help(texteAide)
-        .onHover { estSurvole = $0 }
+        .help(helpText)
+        .onHover { isHovered = $0 }
     }
 }
 
-// MARK: - Bouton épingle d'un élément (avec animation d'épinglage)
+// MARK: - Item pin button (with pin animation)
 
-private struct BoutonEpingleElement: View {
-    let estEpingle: Bool
+private struct ItemPinButton: View {
+    let isPinned: Bool
     let action: () -> Void
 
-    @State private var estSurvole = false
-    @State private var estPresse  = false
-    @State private var rotation: Double = 0
-    @State private var scale: CGFloat = 1
+    @State private var isHovered  = false
+    @State private var isPressed  = false
+    @State private var rotation:  Double = 0
+    @State private var scale:     CGFloat = 1
 
-    init(estEpingle: Bool, action: @escaping () -> Void) {
-        self.estEpingle = estEpingle
-        self.action = action
-        self._rotation = State(initialValue: estEpingle ? 45 : 0)
+    init(isPinned: Bool, action: @escaping () -> Void) {
+        self.isPinned = isPinned
+        self.action   = action
+        self._rotation = State(initialValue: isPinned ? 45 : 0)
     }
 
     var body: some View {
         Button {
-            let versEpingle = !estEpingle
-            if versEpingle {
+            let pinning = !isPinned
+            if pinning {
                 withAnimation(.interpolatingSpring(stiffness: 280, damping: 14)) {
                     rotation = 45
-                    scale = 1.25
+                    scale    = 1.25
                 }
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.18) {
                     withAnimation(.spring(response: 0.28, dampingFraction: 0.55)) { scale = 1.0 }
@@ -1370,120 +1370,117 @@ private struct BoutonEpingleElement: View {
             } else {
                 withAnimation(.spring(response: 0.22, dampingFraction: 0.75)) {
                     rotation = 0
-                    scale = 0.85
+                    scale    = 0.85
                 }
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.12) {
                     withAnimation(.spring(response: 0.2, dampingFraction: 0.6)) { scale = 1.0 }
                 }
             }
-            withAnimation(.spring(response: 0.22, dampingFraction: 0.65)) { estPresse = true }
+            withAnimation(.spring(response: 0.22, dampingFraction: 0.65)) { isPressed = true }
             action()
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-                withAnimation(.spring(response: 0.28, dampingFraction: 0.75)) { estPresse = false }
+                withAnimation(.spring(response: 0.28, dampingFraction: 0.75)) { isPressed = false }
             }
         } label: {
-            Image(systemName: estEpingle ? "pin.fill" : "pin")
+            Image(systemName: isPinned ? "pin.fill" : "pin")
                 .font(.system(size: 11, weight: .semibold))
-                .foregroundStyle(estEpingle ? Color.accentColor : (estSurvole ? Color.accentColor : Color.secondary))
+                .foregroundStyle(isPinned ? Color.accentColor : (isHovered ? Color.accentColor : Color.secondary))
                 .rotationEffect(.degrees(rotation))
                 .scaleEffect(scale)
                 .frame(width: 36, height: 34)
                 .background(
-                    RoundedRectangle(cornerRadius: 26).fill(estEpingle
+                    RoundedRectangle(cornerRadius: 26).fill(isPinned
                         ? Color.accentColor.opacity(0.15)
-                        : (estSurvole ? Color.accentColor.opacity(0.12) : Color.primary.opacity(0.06)))
+                        : (isHovered ? Color.accentColor.opacity(0.12) : Color.primary.opacity(0.06)))
                 )
-                .animation(.spring(response: 0.28, dampingFraction: 0.78), value: estSurvole)
-
+                .animation(.spring(response: 0.28, dampingFraction: 0.78), value: isHovered)
                 .animation(.interpolatingSpring(stiffness: 280, damping: 14), value: scale)
         }
         .buttonStyle(.plain)
-        .help(estEpingle ? L.epingler : L.epingler)
-        .onHover { estSurvole = $0 }
-        .onChange(of: estEpingle) {
+        .help(isPinned ? L.pinItem : L.pinItem)
+        .onHover { isHovered = $0 }
+        .onChange(of: isPinned) {
             withAnimation(.spring(response: 0.25, dampingFraction: 0.80)) {
-                rotation = estEpingle ? 45 : 0
+                rotation = isPinned ? 45 : 0
             }
         }
     }
 }
 
-// MARK: - Bouton de sauvegarde d'image
+// MARK: - Image save button
 
-private struct BoutonSauvegardeImage: View {
+private struct SaveImageButton: View {
     let image: NSImage
-    @State private var estSurvole = false
+    @State private var isHovered = false
 
     var body: some View {
-        BoutonConfirme(texteAide: "Enregistrer l'image sur le Bureau", action: sauvegarderSurBureau) { confirme in
+        ConfirmButton(helpText: "Save image to Desktop", action: saveToDesktop) { confirmed in
             Group {
-                if confirme {
+                if confirmed {
                     Image(systemName: "checkmark.circle.fill").transition(.scale.combined(with: .opacity))
                 } else {
                     Image(systemName: "square.and.arrow.down")
                 }
             }
             .font(.system(size: 13, weight: .semibold))
-            .foregroundStyle(confirme ? .white : (estSurvole ? Color.accentColor : Color.secondary))
+            .foregroundStyle(confirmed ? .white : (isHovered ? Color.accentColor : Color.secondary))
             .frame(width: 36, height: 34)
             .background(
-                RoundedRectangle(cornerRadius: 26).fill(confirme
+                RoundedRectangle(cornerRadius: 26).fill(confirmed
                     ? Color.green
-                    : (estSurvole ? Color.accentColor.opacity(0.12) : Color.primary.opacity(0.06)))
+                    : (isHovered ? Color.accentColor.opacity(0.12) : Color.primary.opacity(0.06)))
             )
-            
-            .animation(.spring(response: 0.28, dampingFraction: 0.78), value: estSurvole)
+            .animation(.spring(response: 0.28, dampingFraction: 0.78), value: isHovered)
         }
-        .onHover { estSurvole = $0 }
+        .onHover { isHovered = $0 }
     }
 
-    private func sauvegarderSurBureau() {
-        guard let data = donneesPNG(depuis: image) else { return }
-        let bureau   = FileManager.default.urls(for: .desktopDirectory, in: .userDomainMask).first!
-        let nomFich  = "PressePapiers_\(DateFormatter.heureSeule.string(from: Date())).png"
-        try? data.write(to: bureau.appendingPathComponent(nomFich))
+    private func saveToDesktop() {
+        guard let data = pngData(from: image) else { return }
+        let desktop  = FileManager.default.urls(for: .desktopDirectory, in: .userDomainMask).first!
+        let fileName = "Clipboard_\(DateFormatter.timeOnly.string(from: Date())).png"
+        try? data.write(to: desktop.appendingPathComponent(fileName))
     }
 }
 
-// MARK: - Bouton de sauvegarde de fichier (URL → Bureau)
+// MARK: - File save button (URL → Desktop)
 
-private struct BoutonSauvegardeFichier: View {
+private struct SaveFileButton: View {
     let url: URL
-    @State private var estSurvole = false
+    @State private var isHovered = false
 
     var body: some View {
-        BoutonConfirme(texteAide: "Enregistrer le fichier sur le Bureau", action: sauvegarderSurBureau) { confirme in
+        ConfirmButton(helpText: "Save file to Desktop", action: saveToDesktop) { confirmed in
             Group {
-                if confirme {
+                if confirmed {
                     Image(systemName: "checkmark.circle.fill").transition(.scale.combined(with: .opacity))
                 } else {
                     Image(systemName: "square.and.arrow.down")
                 }
             }
             .font(.system(size: 13, weight: .semibold))
-            .foregroundStyle(confirme ? .white : (estSurvole ? Color.accentColor : Color.secondary))
+            .foregroundStyle(confirmed ? .white : (isHovered ? Color.accentColor : Color.secondary))
             .frame(width: 36, height: 34)
             .background(
-                RoundedRectangle(cornerRadius: 26).fill(confirme
+                RoundedRectangle(cornerRadius: 26).fill(confirmed
                     ? Color.green
-                    : (estSurvole ? Color.accentColor.opacity(0.12) : Color.primary.opacity(0.06)))
+                    : (isHovered ? Color.accentColor.opacity(0.12) : Color.primary.opacity(0.06)))
             )
-            
-            .animation(.spring(response: 0.28, dampingFraction: 0.78), value: estSurvole)
+            .animation(.spring(response: 0.28, dampingFraction: 0.78), value: isHovered)
         }
-        .onHover { estSurvole = $0 }
+        .onHover { isHovered = $0 }
     }
 
-    private func sauvegarderSurBureau() {
-        let bureau = FileManager.default.urls(for: .desktopDirectory, in: .userDomainMask).first!
-        let destination = bureau.appendingPathComponent(url.lastPathComponent)
-        var dest = destination
-        var compteur = 1
+    private func saveToDesktop() {
+        let desktop     = FileManager.default.urls(for: .desktopDirectory, in: .userDomainMask).first!
+        let destination = desktop.appendingPathComponent(url.lastPathComponent)
+        var dest    = destination
+        var counter = 1
         while FileManager.default.fileExists(atPath: dest.path) {
-            let nom = url.deletingPathExtension().lastPathComponent
-            let ext = url.pathExtension
-            dest = bureau.appendingPathComponent("\(nom) \(compteur).\(ext)")
-            compteur += 1
+            let name = url.deletingPathExtension().lastPathComponent
+            let ext  = url.pathExtension
+            dest = desktop.appendingPathComponent("\(name) \(counter).\(ext)")
+            counter += 1
         }
         try? FileManager.default.copyItem(at: url, to: dest)
     }
@@ -1491,33 +1488,34 @@ private struct BoutonSauvegardeFichier: View {
 
 
 
-// IcôneApplication supprimée — remplacée par le nom texte seul
+// Application icon removed — replaced by plain text name only
 
-private struct ControleFiltreSegmente: View {
-    let filtres: [FiltrePressePapier]
-    @Binding var filtreActif: FiltrePressePapier
-    var iconesSeulement: Bool = false
+private struct SegmentedFilterControl: View {
+    let filters: [ClipboardFilter]
+    @Binding var activeFilter: ClipboardFilter
+    var iconsOnly: Bool = false
 
     var body: some View {
         GeometryReader { geo in
-            let nombre = CGFloat(filtres.count)
-            let idx    = CGFloat(filtres.firstIndex(of: filtreActif) ?? 0)
-            let l = geo.size.width / nombre
-            let h = geo.size.height
+            let count = CGFloat(filters.count)
+            let index = CGFloat(filters.firstIndex(of: activeFilter) ?? 0)
+            let segmentWidth  = geo.size.width / count
+            let segmentHeight = geo.size.height
 
             ZStack(alignment: .leading) {
                 RoundedRectangle(cornerRadius: 20).fill(Color.primary.opacity(0.08))
                 RoundedRectangle(cornerRadius: 18)
                     .fill(Color(NSColor.windowBackgroundColor))
                     .shadow(color: .black.opacity(0.15), radius: 2, x: 0, y: 1)
-                    .frame(width: l, height: h)
-                    .offset(x: idx * l)
-                    .animation(.spring(response: 0.3, dampingFraction: 0.78), value: filtreActif)
+                    .frame(width: segmentWidth, height: segmentHeight)
+                    .offset(x: index * segmentWidth)
+                    .animation(.spring(response: 0.3, dampingFraction: 0.78), value: activeFilter)
 
                 HStack(spacing: 0) {
-                    ForEach(filtres, id: \.self) { filtre in
-                        BoutonSegment(filtre: filtre, estActif: filtreActif == filtre, largeur: l, hauteur: h, iconesSeulement: iconesSeulement) {
-                            withAnimation(.spring(response: 0.3, dampingFraction: 0.78)) { filtreActif = filtre }
+                    ForEach(filters, id: \.self) { filter in
+                        SegmentButton(filter: filter, isActive: activeFilter == filter,
+                                      width: segmentWidth, height: segmentHeight, iconsOnly: iconsOnly) {
+                            withAnimation(.spring(response: 0.3, dampingFraction: 0.78)) { activeFilter = filter }
                         }
                     }
                 }
@@ -1527,76 +1525,76 @@ private struct ControleFiltreSegmente: View {
     }
 }
 
-private struct BoutonSegment: View {
-    let filtre: FiltrePressePapier
-    let estActif: Bool
-    let largeur: CGFloat
-    let hauteur: CGFloat
-    var iconesSeulement: Bool = false
+private struct SegmentButton: View {
+    let filter: ClipboardFilter
+    let isActive: Bool
+    let width: CGFloat
+    let height: CGFloat
+    var iconsOnly: Bool = false
     let action: () -> Void
 
-    @State private var estSurvole = false
+    @State private var isHovered = false
 
     var body: some View {
         Button(action: action) {
             Group {
-                if iconesSeulement {
-                    Image(systemName: filtre.icone)
+                if iconsOnly {
+                    Image(systemName: filter.icon)
                         .font(.system(size: 10, weight: .medium))
-                } else if estActif {
-                    Text(filtre.etiquette)
+                } else if isActive {
+                    Text(filter.label)
                         .font(.system(size: 10, weight: .medium))
                         .lineLimit(1)
                         .transition(.opacity.combined(with: .scale(scale: 0.85, anchor: .center)))
                 } else {
-                    Image(systemName: filtre.icone)
+                    Image(systemName: filter.icon)
                         .font(.system(size: 10, weight: .medium))
                         .transition(.opacity.combined(with: .scale(scale: 0.85, anchor: .center)))
                 }
             }
-            .foregroundStyle(estActif ? .primary : (estSurvole ? .primary : .secondary))
+            .foregroundStyle(isActive ? .primary : (isHovered ? .primary : .secondary))
             .padding(.horizontal, 6)
-            .frame(width: largeur, height: hauteur)
+            .frame(width: width, height: height)
             .background(
-                estSurvole && !estActif
+                isHovered && !isActive
                     ? RoundedRectangle(cornerRadius: 18).fill(Color.primary.opacity(0.06))
                     : nil
             )
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .onHover { estSurvole = $0 }
-        .animation(.spring(response: 0.3, dampingFraction: 0.78), value: estActif)
+        .onHover { isHovered = $0 }
+        .animation(.spring(response: 0.3, dampingFraction: 0.78), value: isActive)
     }
 }
 
-// MARK: - CGEvent tap partagé (bloquant, niveau session)
+// MARK: - Shared CGEvent tap (blocking, session level)
 //
-// Pourquoi CGEvent tap et pas LocalMonitor / GlobalMonitor ?
-// • .nonactivatingPanel rend makeKey() inopérant → LocalMonitor ne reçoit rien.
-// • GlobalMonitor reçoit les touches mais ne peut pas les bloquer : elles
-//   arrivent aussi à l'app en arrière-plan (double-frappe).
-// • CGEvent tap opère en amont de toute distribution fenêtre. Retourner nil
-//   dans le callback supprime définitivement l'événement — même avec
-//   .nonactivatingPanel, et indépendamment de quelle fenêtre est keyWindow.
-//   C'est le même mécanisme utilisé pour le raccourci d'ouverture.
+// Why CGEvent tap instead of LocalMonitor / GlobalMonitor?
+// • .nonactivatingPanel makes makeKey() inoperative → LocalMonitor receives nothing.
+// • GlobalMonitor receives key presses but cannot block them: they also
+//   reach the background app (double keystroke).
+// • CGEvent tap operates upstream of all window dispatch. Returning nil
+//   in the callback permanently suppresses the event — even with
+//   .nonactivatingPanel, regardless of which window is keyWindow.
+//   This is the same mechanism used for the open shortcut.
 
-private enum TapClavierActif {
-    /// Installe un CGEvent tap bloquant pour les keyDown.
-    /// - parameter handler: appelé sur le thread principal avec l'NSEvent correspondant.
-    /// - returns: opaque wrapper à passer à `retirer(_:)` pour nettoyer.
-    static func installer(handler: @escaping (NSEvent) -> Void) -> CFMachPort? {
-        let masque = CGEventMask(1 << CGEventType.keyDown.rawValue)
+private enum ActiveKeyboardTap {
+    /// Installs a blocking CGEvent tap for keyDown events.
+    /// - parameter handler: called on the main thread with the corresponding NSEvent.
+    /// - returns: opaque wrapper to pass to `remove(_:)` for cleanup.
+    static func install(handler: @escaping (NSEvent) -> Void) -> CFMachPort? {
+        let mask = CGEventMask(1 << CGEventType.keyDown.rawValue)
 
-        // On stocke le handler dans une box pour le passer via refcon (UnsafeMutableRawPointer).
-        let box = HandlerBox(handler)
+        // Store the handler in a box to pass it via refcon (UnsafeMutableRawPointer).
+        let box    = HandlerBox(handler)
         let refcon = Unmanaged.passRetained(box).toOpaque()
 
         guard let tap = CGEvent.tapCreate(
             tap: .cgSessionEventTap,
             place: .headInsertEventTap,
             options: .defaultTap,
-            eventsOfInterest: masque,
+            eventsOfInterest: mask,
             callback: { _, _, cgEvent, refcon -> Unmanaged<CGEvent>? in
                 guard let refcon,
                       let nsEvent = NSEvent(cgEvent: cgEvent) else {
@@ -1604,7 +1602,7 @@ private enum TapClavierActif {
                 }
                 let box = Unmanaged<HandlerBox>.fromOpaque(refcon).takeUnretainedValue()
                 DispatchQueue.main.async { box.handler(nsEvent) }
-                return nil   // bloque l'événement — il n'atteint aucune autre fenêtre
+                return nil   // blocks the event — it reaches no other window
             },
             userInfo: refcon
         ) else {
@@ -1618,52 +1616,51 @@ private enum TapClavierActif {
         return tap
     }
 
-    /// Désactive et libère le tap retourné par `installer`.
-    static func retirer(_ tap: CFMachPort?) {
+    /// Disables and releases the tap returned by `install`.
+    static func remove(_ tap: CFMachPort?) {
         guard let tap else { return }
         CGEvent.tapEnable(tap: tap, enable: false)
     }
 
-    // Box pour transporter le closure Swift à travers le refcon C.
+    // Box to carry the Swift closure through the C refcon.
     private final class HandlerBox {
         let handler: (NSEvent) -> Void
         init(_ h: @escaping (NSEvent) -> Void) { handler = h }
     }
 }
 
-// MARK: - Bouton recherche
+// MARK: - Search button
 
-private struct BoutonRecherche: View {
+private struct SearchButton: View {
     let action: () -> Void
-    @State private var estSurvole = false
+    @State private var isHovered = false
 
     var body: some View {
         Button(action: action) {
             Image(systemName: "magnifyingglass")
                 .font(.system(size: 11, weight: .semibold))
-                .foregroundStyle(estSurvole ? Color.accentColor : Color.secondary)
+                .foregroundStyle(isHovered ? Color.accentColor : Color.secondary)
                 .frame(width: 30, height: 30)
                 .background(
                     Circle()
-                        .fill(estSurvole ? Color.accentColor.opacity(0.12) : Color.primary.opacity(0.06))
+                        .fill(isHovered ? Color.accentColor.opacity(0.12) : Color.primary.opacity(0.06))
                 )
-                
         }
         .buttonStyle(.plain)
-        .onHover { estSurvole = $0 }
-        .animation(.spring(response: 0.28, dampingFraction: 0.78), value: estSurvole)
+        .onHover { isHovered = $0 }
+        .animation(.spring(response: 0.28, dampingFraction: 0.78), value: isHovered)
     }
 }
 
-// MARK: - Champ de recherche inline (remplace les filtres)
+// MARK: - Inline search field (replaces the filter bar)
 
-private struct ChampRechercheInline: View {
-    @Binding var texte: String
-    @Binding var actif: Bool
+private struct InlineSearchField: View {
+    @Binding var text: String
+    @Binding var isActive: Bool
 
-    @State private var curseurVisible = true
-    @State private var timerCurseur: Timer? = nil
-    @State private var moniteurClavier: CFMachPort? = nil
+    @State private var cursorVisible:    Bool = true
+    @State private var cursorTimer:      Timer? = nil
+    @State private var keyboardMonitor:  CFMachPort? = nil
 
     var body: some View {
         HStack(spacing: 6) {
@@ -1672,29 +1669,29 @@ private struct ChampRechercheInline: View {
                 .foregroundStyle(.secondary)
 
             ZStack(alignment: .leading) {
-                if texte.isEmpty {
-                    Text(S("Rechercher…", "Search…"))
+                if text.isEmpty {
+                    Text(S("Search…", "Search…"))
                         .font(.system(size: 12))
                         .foregroundStyle(.tertiary)
                 }
                 HStack(spacing: 0) {
-                    Text(texte)
+                    Text(text)
                         .font(.system(size: 12))
                         .foregroundStyle(.primary)
                     Rectangle()
                         .fill(Color.accentColor)
                         .frame(width: 1.5, height: 14)
-                        .opacity(curseurVisible ? 1 : 0)
+                        .opacity(cursorVisible ? 1 : 0)
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
 
-            // Croix vide le texte si du texte est écrit, sinon ferme le champ
+            // Cross: clears text if text is present, otherwise closes the field
             Button {
-                if texte.isEmpty { fermer() } else { texte = "" }
+                if text.isEmpty { close() } else { text = "" }
             } label: {
-                Image(systemName: texte.isEmpty ? "xmark" : "xmark.circle.fill")
-                    .font(.system(size: texte.isEmpty ? 10 : 12, weight: texte.isEmpty ? .semibold : .regular))
+                Image(systemName: text.isEmpty ? "xmark" : "xmark.circle.fill")
+                    .font(.system(size: text.isEmpty ? 10 : 12, weight: text.isEmpty ? .semibold : .regular))
                     .foregroundStyle(.secondary)
                     .frame(width: 20, height: 20)
             }
@@ -1704,57 +1701,57 @@ private struct ChampRechercheInline: View {
         .frame(height: 32)
         .background(RoundedRectangle(cornerRadius: 20).fill(Color.primary.opacity(0.08)))
         .frame(maxWidth: .infinity)
-        .onAppear { installerMoniteur() }
-        .onDisappear { retirerMoniteur() }
+        .onAppear { installMonitor() }
+        .onDisappear { removeMonitor() }
     }
 
-    private func fermer() {
+    private func close() {
         withAnimation(.spring(response: 0.32, dampingFraction: 0.78)) {
-            texte = ""
-            actif = false
+            text     = ""
+            isActive = false
         }
     }
 
-    private func installerMoniteur() {
-        curseurVisible = true
-        timerCurseur = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { _ in
-            DispatchQueue.main.async { curseurVisible.toggle() }
+    private func installMonitor() {
+        cursorVisible = true
+        cursorTimer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { _ in
+            DispatchQueue.main.async { cursorVisible.toggle() }
         }
 
-        // CGEvent tap bloquant : intercepte les keyDown en amont de toute distribution.
-        // Retourner nil dans le callback bloque l'événement — il n'atteint pas l'app en fond.
-        // C'est la seule solution fiable avec .nonactivatingPanel :
-        //   • LocalMonitor ne reçoit rien car makeKey() est inopérant sur .nonactivatingPanel.
-        //   • GlobalMonitor reçoit les touches mais ne peut pas les bloquer (double-frappe).
-        moniteurClavier = TapClavierActif.installer(handler: { event in
-            traiterEvenement(event)
+        // Blocking CGEvent tap: intercepts keyDown events before any dispatch.
+        // Returning nil in the callback blocks the event — it never reaches the background app.
+        // This is the only reliable solution with .nonactivatingPanel:
+        //   • LocalMonitor receives nothing because makeKey() is inoperative on .nonactivatingPanel.
+        //   • GlobalMonitor receives key presses but cannot block them (double keystroke).
+        keyboardMonitor = ActiveKeyboardTap.install(handler: { event in
+            handleEvent(event)
         })
     }
 
-    private func retirerMoniteur() {
-        timerCurseur?.invalidate()
-        timerCurseur = nil
-        TapClavierActif.retirer(moniteurClavier)
-        moniteurClavier = nil
+    private func removeMonitor() {
+        cursorTimer?.invalidate()
+        cursorTimer = nil
+        ActiveKeyboardTap.remove(keyboardMonitor)
+        keyboardMonitor = nil
     }
 
-    private func traiterEvenement(_ event: NSEvent) {
-        if event.keyCode == 53 { fermer(); return }
-        if event.keyCode == 51 { if !texte.isEmpty { texte = String(texte.dropLast()) }; return }
+    private func handleEvent(_ event: NSEvent) {
+        if event.keyCode == 53 { close(); return }
+        if event.keyCode == 51 { if !text.isEmpty { text = String(text.dropLast()) }; return }
         let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
         if !flags.intersection([.command, .control, .option]).isEmpty { return }
         if let chars = event.characters {
-            let filtrés = chars.filter { !$0.isNewline && $0 != "\t" && $0.asciiValue ?? 0 >= 32 }
-            if !filtrés.isEmpty { texte += filtrés }
+            let filtered = chars.filter { !$0.isNewline && $0 != "\t" && $0.asciiValue ?? 0 >= 32 }
+            if !filtered.isEmpty { text += filtered }
         }
     }
 }
 
-// MARK: - Bouton de réinitialisation
+// MARK: - Reset button
 
-private struct BoutonReinitialisation: View {
+private struct ResetButton: View {
     let action: () -> Void
-    @State private var estSurvole = false
+    @State private var isHovered = false
     @State private var rotation: Double = 0
 
     var body: some View {
@@ -1768,33 +1765,32 @@ private struct BoutonReinitialisation: View {
                 .rotationEffect(.degrees(rotation))
                 .frame(width: 30, height: 30)
                 .background(
-                    Circle().fill(estSurvole ? Color.red.opacity(0.15) : Color.primary.opacity(0.06))
+                    Circle().fill(isHovered ? Color.red.opacity(0.15) : Color.primary.opacity(0.06))
                 )
-                
         }
         .buttonStyle(.plain)
-        .help(L.effacerHisto)
-        .onHover { estSurvole = $0 }
-        .animation(.spring(response: 0.28, dampingFraction: 0.78), value: estSurvole)
+        .help(L.clearHistory)
+        .onHover { isHovered = $0 }
+        .animation(.spring(response: 0.28, dampingFraction: 0.78), value: isHovered)
     }
 }
 
-// MARK: - Pipette (sélecteur de couleur à l'écran)
+// MARK: - Color picker (screen color sampler)
 
-/// Construit un curseur correspondant à la maquette de référence :
-/// - Anneau coloré épais (extérieur) montrant la couleur détectée
-/// - Intérieur semi-transparent sombre (20 % noir) pour voir le contenu en dessous
-/// - Petit réticule propre au centre
-private func creerCurseurLoupe(couleur: NSColor?) -> NSCursor {
-    // Taille totale du canevas (en points). Les curseurs macOS sont rendus à 2× sur Retina.
-    let taille: CGFloat = 52
-    let echelle: CGFloat = 2          // échelle Retina explicite pour un rendu net
-    let taillePixels = taille * echelle
+/// Builds a cursor matching the reference design:
+/// - Thick colored ring (outer) showing the detected color
+/// - Semi-transparent dark interior (20% black) to see content underneath
+/// - Small clean crosshair at the center
+private func createMagnifierCursor(color: NSColor?) -> NSCursor {
+    // Total canvas size (in points). macOS cursors are rendered at 2× on Retina.
+    let size: CGFloat = 52
+    let scale: CGFloat = 2          // explicit Retina scale for crisp rendering
+    let pixelSize = size * scale
 
-    let repBitmap = NSBitmapImageRep(
+    let bitmapRep = NSBitmapImageRep(
         bitmapDataPlanes: nil,
-        pixelsWide: Int(taillePixels),
-        pixelsHigh: Int(taillePixels),
+        pixelsWide: Int(pixelSize),
+        pixelsHigh: Int(pixelSize),
         bitsPerSample: 8,
         samplesPerPixel: 4,
         hasAlpha: true,
@@ -1805,297 +1801,297 @@ private func creerCurseurLoupe(couleur: NSColor?) -> NSCursor {
     )!
 
     NSGraphicsContext.saveGraphicsState()
-    let ctx = NSGraphicsContext(bitmapImageRep: repBitmap)!
-    ctx.cgContext.scaleBy(x: echelle, y: echelle)
+    let ctx = NSGraphicsContext(bitmapImageRep: bitmapRep)!
+    ctx.cgContext.scaleBy(x: scale, y: scale)
     NSGraphicsContext.current = ctx
 
-    let cg  = ctx.cgContext
-    let cx  = taille / 2
-    let cy  = taille / 2
+    let cg = ctx.cgContext
+    let cx = size / 2
+    let cy = size / 2
 
     // ── Dimensions ───────────────────────────────────────────────
-    let anneauExterieur: CGFloat = 24   // bord extérieur de l'anneau coloré
-    let anneauInterieur: CGFloat = 16   // bord intérieur de l'anneau / extérieur de la zone sombre
-    let reticuleDemo:    CGFloat = 4    // demi-longueur de chaque bras du réticule
-    let reticulEcart:    CGFloat = 2    // espace entre le bras et le centre
+    let outerRing:       CGFloat = 24   // outer edge of the colored ring
+    let innerRing:       CGFloat = 16   // inner edge of the ring / outer edge of the dark zone
+    let crosshairLength: CGFloat = 4    // half-length of each crosshair arm
+    let crosshairGap:    CGFloat = 2    // gap between arm and center
 
-    // ── 1. Anneau coloré (couleur détectée, opacité pleine) ──────
-    let couleurAnneau = (couleur ?? NSColor(white: 0.75, alpha: 1))
+    // ── 1. Colored ring (detected color, full opacity) ─────────
+    let ringColor = (color ?? NSColor(white: 0.75, alpha: 1))
         .usingColorSpace(.sRGB) ?? NSColor(white: 0.75, alpha: 1)
 
-    // Dessiner un cercle plein puis découper le cercle intérieur
-    cg.setFillColor(couleurAnneau.cgColor)
+    // Draw a full circle then cut out the inner circle
+    cg.setFillColor(ringColor.cgColor)
     cg.addArc(center: CGPoint(x: cx, y: cy),
-              radius: anneauExterieur, startAngle: 0, endAngle: .pi * 2, clockwise: false)
+              radius: outerRing, startAngle: 0, endAngle: .pi * 2, clockwise: false)
     cg.fillPath()
 
-    // ── 2. Fine bordure sombre autour de l'anneau pour le contraste ──
+    // ── 2. Thin dark border around the ring for contrast ─────────
     cg.setStrokeColor(NSColor.black.withAlphaComponent(0.40).cgColor)
     cg.setLineWidth(1.0)
-    // Bord extérieur
+    // Outer border
     cg.addArc(center: CGPoint(x: cx, y: cy),
-              radius: anneauExterieur - 0.5, startAngle: 0, endAngle: .pi * 2, clockwise: false)
+              radius: outerRing - 0.5, startAngle: 0, endAngle: .pi * 2, clockwise: false)
     cg.strokePath()
-    // Bord intérieur de l'anneau
+    // Inner border of the ring
     cg.addArc(center: CGPoint(x: cx, y: cy),
-              radius: anneauInterieur + 0.5, startAngle: 0, endAngle: .pi * 2, clockwise: false)
+              radius: innerRing + 0.5, startAngle: 0, endAngle: .pi * 2, clockwise: false)
     cg.strokePath()
 
-    // ── 3. Intérieur entièrement transparent — percer un vrai trou avec le mode clear ──
+    // ── 3. Fully transparent interior — punch a true hole with clear blend mode ──
     cg.setBlendMode(.clear)
     cg.addArc(center: CGPoint(x: cx, y: cy),
-              radius: anneauInterieur, startAngle: 0, endAngle: .pi * 2, clockwise: false)
+              radius: innerRing, startAngle: 0, endAngle: .pi * 2, clockwise: false)
     cg.fillPath()
     cg.setBlendMode(.normal)
 
-    // ── 4. Petit réticule dans la zone sombre ────────────────────
-    // Blanc avec légère ombre pour lisibilité sur tout fond
-    let couleurReticule = NSColor.white.withAlphaComponent(0.90).cgColor
+    // ── 4. Small crosshair in the dark zone ──────────────────────
+    // White with slight shadow for legibility on any background
+    let crosshairColor = NSColor.white.withAlphaComponent(0.90).cgColor
     cg.setStrokeColor(NSColor.black.withAlphaComponent(0.35).cgColor)
-    cg.setLineWidth(2.5)   // passe d'ombre
+    cg.setLineWidth(2.5)   // shadow pass
     // Horizontal
-    cg.move(to: CGPoint(x: cx - reticuleDemo - reticulEcart, y: cy))
-    cg.addLine(to: CGPoint(x: cx - reticulEcart, y: cy))
-    cg.move(to: CGPoint(x: cx + reticulEcart, y: cy))
-    cg.addLine(to: CGPoint(x: cx + reticuleDemo + reticulEcart, y: cy))
+    cg.move(to: CGPoint(x: cx - crosshairLength - crosshairGap, y: cy))
+    cg.addLine(to: CGPoint(x: cx - crosshairGap, y: cy))
+    cg.move(to: CGPoint(x: cx + crosshairGap, y: cy))
+    cg.addLine(to: CGPoint(x: cx + crosshairLength + crosshairGap, y: cy))
     // Vertical
-    cg.move(to: CGPoint(x: cx, y: cy - reticuleDemo - reticulEcart))
-    cg.addLine(to: CGPoint(x: cx, y: cy - reticulEcart))
-    cg.move(to: CGPoint(x: cx, y: cy + reticulEcart))
-    cg.addLine(to: CGPoint(x: cx, y: cy + reticuleDemo + reticulEcart))
+    cg.move(to: CGPoint(x: cx, y: cy - crosshairLength - crosshairGap))
+    cg.addLine(to: CGPoint(x: cx, y: cy - crosshairGap))
+    cg.move(to: CGPoint(x: cx, y: cy + crosshairGap))
+    cg.addLine(to: CGPoint(x: cx, y: cy + crosshairLength + crosshairGap))
     cg.strokePath()
 
-    cg.setStrokeColor(couleurReticule)
-    cg.setLineWidth(1.5)   // passe de premier plan
+    cg.setStrokeColor(crosshairColor)
+    cg.setLineWidth(1.5)   // foreground pass
     // Horizontal
-    cg.move(to: CGPoint(x: cx - reticuleDemo - reticulEcart, y: cy))
-    cg.addLine(to: CGPoint(x: cx - reticulEcart, y: cy))
-    cg.move(to: CGPoint(x: cx + reticulEcart, y: cy))
-    cg.addLine(to: CGPoint(x: cx + reticuleDemo + reticulEcart, y: cy))
+    cg.move(to: CGPoint(x: cx - crosshairLength - crosshairGap, y: cy))
+    cg.addLine(to: CGPoint(x: cx - crosshairGap, y: cy))
+    cg.move(to: CGPoint(x: cx + crosshairGap, y: cy))
+    cg.addLine(to: CGPoint(x: cx + crosshairLength + crosshairGap, y: cy))
     // Vertical
-    cg.move(to: CGPoint(x: cx, y: cy - reticuleDemo - reticulEcart))
-    cg.addLine(to: CGPoint(x: cx, y: cy - reticulEcart))
-    cg.move(to: CGPoint(x: cx, y: cy + reticulEcart))
-    cg.addLine(to: CGPoint(x: cx, y: cy + reticuleDemo + reticulEcart))
+    cg.move(to: CGPoint(x: cx, y: cy - crosshairLength - crosshairGap))
+    cg.addLine(to: CGPoint(x: cx, y: cy - crosshairGap))
+    cg.move(to: CGPoint(x: cx, y: cy + crosshairGap))
+    cg.addLine(to: CGPoint(x: cx, y: cy + crosshairLength + crosshairGap))
     cg.strokePath()
 
     NSGraphicsContext.restoreGraphicsState()
 
-    // Composer l'NSImage finale à partir du rep bitmap
-    let img = NSImage(size: NSSize(width: taille, height: taille))
-    img.addRepresentation(repBitmap)
+    // Compose the final NSImage from the bitmap rep
+    let img = NSImage(size: NSSize(width: size, height: size))
+    img.addRepresentation(bitmapRep)
 
-    // Point chaud exactement au centre
-    return NSCursor(image: img, hotSpot: NSPoint(x: taille / 2, y: taille / 2))
+    // Hot spot exactly at the center
+    return NSCursor(image: img, hotSpot: NSPoint(x: size / 2, y: size / 2))
 }
 
-private final class EtatPipette: ObservableObject {
-    @Published var estEnSelection: Bool = false
-    @Published var couleurCourante: NSColor? = nil
+private final class ColorPickerState: ObservableObject {
+    @Published var isSelecting:   Bool = false
+    @Published var currentColor:  NSColor? = nil
 
-    private var minuterieTracage: Timer?
-    private var moniteurDeplacement: Any?
+    private var trackingTimer: Timer?
+    private var moveMonitor:   Any?
 
-    // Tap CGEvent bloquant — remplace le globalClickMonitor pour
-    // intercepter le clic gauche et l'annuler avant qu'il atteigne l'app cible.
-    private var tapClic: CFMachPort?
-    private var sourceRunLoopClic: CFRunLoopSource?
+    // Blocking CGEvent tap — replaces the globalClickMonitor to
+    // intercept left clicks and cancel them before they reach the target app.
+    private var clickTap:            CFMachPort?
+    private var clickRunLoopSource:  CFRunLoopSource?
 
-    // Callback transmis à demarrerSelection, stocké pour que le tap puisse l'appeler.
-    private var callbackSelection: ((NSColor) -> Void)?
+    // Callback passed to startSelection, stored so the tap can call it.
+    private var selectionCallback: ((NSColor) -> Void)?
 
-    func demarrerSelection(surSelection: @escaping (NSColor) -> Void) {
-        estEnSelection = true
-        callbackSelection = surSelection
-        mettreAJourCurseur(pour: nil)
+    func startSelection(onSelection: @escaping (NSColor) -> Void) {
+        isSelecting       = true
+        selectionCallback = onSelection
+        updateCursor(for: nil)
 
-        minuterieTracage = Timer.scheduledTimer(withTimeInterval: 0.05, repeats: true) { [weak self] _ in
-            self?.echantillonnerPixel()
+        trackingTimer = Timer.scheduledTimer(withTimeInterval: 0.05, repeats: true) { [weak self] _ in
+            self?.samplePixel()
         }
-        moniteurDeplacement = NSEvent.addGlobalMonitorForEvents(matching: .mouseMoved) { [weak self] _ in
-            guard let self, self.estEnSelection else { return }
-            self.mettreAJourCurseur(pour: self.couleurCourante)
+        moveMonitor = NSEvent.addGlobalMonitorForEvents(matching: .mouseMoved) { [weak self] _ in
+            guard let self, self.isSelecting else { return }
+            self.updateCursor(for: self.currentColor)
         }
-        installerTapClic()
+        installClickTap()
     }
 
-    func arreterSelection() {
-        estEnSelection = false
-        callbackSelection = nil
-        minuterieTracage?.invalidate(); minuterieTracage = nil
-        if let m = moniteurDeplacement { NSEvent.removeMonitor(m); moniteurDeplacement = nil }
-        supprimerTapClic()
+    func stopSelection() {
+        isSelecting       = false
+        selectionCallback = nil
+        trackingTimer?.invalidate(); trackingTimer = nil
+        if let monitor = moveMonitor { NSEvent.removeMonitor(monitor); moveMonitor = nil }
+        removeClickTap()
         NSCursor.arrow.set()
     }
 
-    // MARK: - Tap CGEvent bloquant
+    // MARK: - Blocking CGEvent tap
 
-    private func installerTapClic() {
-        let masque = CGEventMask(1 << CGEventType.leftMouseDown.rawValue)
+    private func installClickTap() {
+        let mask = CGEventMask(1 << CGEventType.leftMouseDown.rawValue)
         let tap = CGEvent.tapCreate(
             tap: .cgSessionEventTap,
-            place: .headInsertEventTap,   // en tête de chaîne pour intercepter avant tout le monde
-            options: .defaultTap,          // mode bloquant (pas listenOnly)
-            eventsOfInterest: masque,
+            place: .headInsertEventTap,   // head of the chain to intercept before everyone else
+            options: .defaultTap,          // blocking mode (not listenOnly)
+            eventsOfInterest: mask,
             callback: { _, _, event, refcon -> Unmanaged<CGEvent>? in
                 guard let refcon else { return Unmanaged.passRetained(event) }
-                let etat = Unmanaged<EtatPipette>.fromOpaque(refcon).takeUnretainedValue()
-                guard etat.estEnSelection else { return Unmanaged.passRetained(event) }
-                // Capturer couleur et callback AVANT arreterSelection (qui les remet à nil).
-                let couleur   = etat.couleurCourante
-                let callback  = etat.callbackSelection
+                let state = Unmanaged<ColorPickerState>.fromOpaque(refcon).takeUnretainedValue()
+                guard state.isSelecting else { return Unmanaged.passRetained(event) }
+                // Capture color and callback BEFORE stopSelection (which resets them to nil).
+                let color    = state.currentColor
+                let callback = state.selectionCallback
                 DispatchQueue.main.async {
-                    etat.arreterSelection()
-                    if let couleur, let callback { callback(couleur) }
+                    state.stopSelection()
+                    if let color, let callback { callback(color) }
                 }
-                return nil   // ← bloque l'événement, l'app en dessous ne le reçoit pas
+                return nil   // ← blocks the event, the app underneath does not receive it
             },
             userInfo: Unmanaged.passUnretained(self).toOpaque()
         )
 
         guard let tap else {
-            // Pas de permission Accessibilité — repli sur le moniteur passif
-            let repli = NSEvent.addGlobalMonitorForEvents(matching: .leftMouseDown) { [weak self] _ in
+            // No Accessibility permission — fall back to passive monitor
+            let fallback = NSEvent.addGlobalMonitorForEvents(matching: .leftMouseDown) { [weak self] _ in
                 DispatchQueue.main.async {
-                    guard let self, let couleur = self.couleurCourante else { self?.arreterSelection(); return }
-                    self.arreterSelection()
-                    self.callbackSelection?(couleur)
+                    guard let self, let color = self.currentColor else { self?.stopSelection(); return }
+                    self.stopSelection()
+                    self.selectionCallback?(color)
                 }
             }
-            _ = repli   // silencieux, on ne peut pas bloquer sans le tap
+            _ = fallback   // silent, cannot block without the tap
             return
         }
 
-        tapClic = tap
-        sourceRunLoopClic = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, tap, 0)
-        CFRunLoopAddSource(CFRunLoopGetMain(), sourceRunLoopClic, .commonModes)
+        clickTap           = tap
+        clickRunLoopSource = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, tap, 0)
+        CFRunLoopAddSource(CFRunLoopGetMain(), clickRunLoopSource, .commonModes)
         CGEvent.tapEnable(tap: tap, enable: true)
     }
 
-    private func supprimerTapClic() {
-        if let tap = tapClic {
+    private func removeClickTap() {
+        if let tap = clickTap {
             CGEvent.tapEnable(tap: tap, enable: false)
-            if let src = sourceRunLoopClic {
+            if let src = clickRunLoopSource {
                 CFRunLoopRemoveSource(CFRunLoopGetMain(), src, .commonModes)
             }
-            tapClic = nil
-            sourceRunLoopClic = nil
+            clickTap           = nil
+            clickRunLoopSource = nil
         }
     }
 
-    private func mettreAJourCurseur(pour couleur: NSColor?) {
-        creerCurseurLoupe(couleur: couleur).set()
+    private func updateCursor(for color: NSColor?) {
+        createMagnifierCursor(color: color).set()
     }
 
-    /// Échantillonne le pixel sous le curseur.
-    /// Utilise CGDisplayCreateImage (non déprécié) plutôt que CGWindowListCreateImage.
-    private func echantillonnerPixel() {
-        let pos       = NSEvent.mouseLocation
-        let idEcran   = CGMainDisplayID()
-        let hauteurEc = CGFloat(CGDisplayPixelsHigh(idEcran))
-        let rect      = CGRect(x: Int(pos.x), y: Int(hauteurEc - pos.y), width: 1, height: 1)
+    /// Samples the pixel under the cursor.
+    /// Uses CGDisplayCreateImage (non-deprecated) rather than CGWindowListCreateImage.
+    private func samplePixel() {
+        let pos           = NSEvent.mouseLocation
+        let displayID     = CGMainDisplayID()
+        let displayHeight = CGFloat(CGDisplayPixelsHigh(displayID))
+        let rect          = CGRect(x: Int(pos.x), y: Int(displayHeight - pos.y), width: 1, height: 1)
 
-        guard let img    = CGDisplayCreateImage(idEcran, rect: rect),
-              let couleur = NSBitmapImageRep(cgImage: img).colorAt(x: 0, y: 0) else { return }
+        guard let img   = CGDisplayCreateImage(displayID, rect: rect),
+              let color = NSBitmapImageRep(cgImage: img).colorAt(x: 0, y: 0) else { return }
 
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
-            self.couleurCourante = couleur
-            if self.estEnSelection { self.mettreAJourCurseur(pour: couleur) }
+            self.currentColor = color
+            if self.isSelecting { self.updateCursor(for: color) }
         }
     }
 }
 
-private struct BoutonPipette: View {
-    let moniteur: MoniteurPressePapier
-    let fermer: () -> Void
-    /// Si fourni, appelé À LA PLACE de fermer() quand le panneau est épinglé —
-    /// masque sans détruire le panneau pour pouvoir le rouvrir après.
-    var masquerPourPipette: (() -> Void)? = nil
-    /// Appelé après la sélection de couleur pour rouvrir le panneau s'il était épinglé.
-    var rouvrirApresPipette: (() -> Void)? = nil
-    @StateObject private var etatPipette = EtatPipette()
-    @State private var estSurvole = false
+private struct ColorPickerButton: View {
+    let monitor: ClipboardMonitor
+    let close: () -> Void
+    /// If provided, called INSTEAD of close() when the panel is pinned —
+    /// hides without destroying the panel so it can be reopened after.
+    var hideForPicker: (() -> Void)? = nil
+    /// Called after color selection to reopen the panel if it was pinned.
+    var reopenAfterPicker: (() -> Void)? = nil
+    @StateObject private var pickerState = ColorPickerState()
+    @State private var isHovered = false
 
     var body: some View {
         Button {
-            if etatPipette.estEnSelection {
-                etatPipette.arreterSelection()
+            if pickerState.isSelecting {
+                pickerState.stopSelection()
             } else {
-                // Si un masquage temporaire est disponible (panneau épinglé), l'utiliser ;
-                // sinon fermer normalement.
-                let actionCacher = masquerPourPipette ?? fermer
-                actionCacher()
+                // If a temporary hide is available (pinned panel), use it;
+                // otherwise close normally.
+                let hideAction = hideForPicker ?? close
+                hideAction()
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
-                    etatPipette.demarrerSelection { couleur in
-                        guard let rgb = couleur.usingColorSpace(.sRGB) else { return }
+                    pickerState.startSelection { color in
+                        guard let rgb = color.usingColorSpace(.sRGB) else { return }
                         let r = Int(rgb.redComponent   * 255)
                         let g = Int(rgb.greenComponent * 255)
                         let b = Int(rgb.blueComponent  * 255)
-                        let hex    = String(format: "#%02X%02X%02X", r, g, b)
-                        let app    = NSWorkspace.shared.frontmostApplication?.localizedName ?? "Pipette"
-                        let element = ElementPressePapier(contenu: .texte(hex), source: app, date: Date())
-                        moniteur.elements.insert(element, at: 0)
-                        moniteur.copierVersPressePapier(element: element)
-                        // Rouvrir le panneau si épinglé
-                        rouvrirApresPipette?()
+                        let hex     = String(format: "#%02X%02X%02X", r, g, b)
+                        let appName = NSWorkspace.shared.frontmostApplication?.localizedName ?? "Color Picker"
+                        let item    = ClipboardItem(content: .text(hex), source: appName, date: Date())
+                        monitor.items.insert(item, at: 0)
+                        monitor.copyToClipboard(item: item)
+                        // Reopen the panel if it was pinned
+                        reopenAfterPicker?()
                     }
                 }
             }
         } label: {
             HStack(spacing: 5) {
-                Image(systemName: etatPipette.estEnSelection ? "stop.circle.fill" : "eyedropper")
+                Image(systemName: pickerState.isSelecting ? "stop.circle.fill" : "eyedropper")
                     .font(.system(size: 10, weight: .medium))
-                Text(etatPipette.estEnSelection ? L.annulerPipette : L.pipette)
+                Text(pickerState.isSelecting ? L.cancelColorPicker : L.colorPicker)
                     .font(.system(size: 10, weight: .medium))
             }
-            .foregroundStyle(etatPipette.estEnSelection ? Color.red : (estSurvole ? .primary : .secondary))
+            .foregroundStyle(pickerState.isSelecting ? Color.red : (isHovered ? .primary : .secondary))
             .frame(maxWidth: .infinity)
             .padding(.vertical, 10)
             .background(
-                etatPipette.estEnSelection
+                pickerState.isSelecting
                     ? Color.red.opacity(0.08)
-                    : (estSurvole ? Color.primary.opacity(0.08) : Color.primary.opacity(0.05)),
+                    : (isHovered ? Color.primary.opacity(0.08) : Color.primary.opacity(0.05)),
                 in: RoundedRectangle(cornerRadius: 20)
             )
         }
         .buttonStyle(.plain)
-        .help(etatPipette.estEnSelection ? L.aideEnCoursPipette : L.aideDebutPipette)
-        .onHover { estSurvole = $0 }
+        .help(pickerState.isSelecting ? L.colorPickerActiveHint : L.colorPickerStartHint)
+        .onHover { isHovered = $0 }
     }
 }
 
-// MARK: - Helper bouton survolable pour BarreSequence
+// MARK: - Hoverable button helper for SequenceBar
 
-private struct BoutonSurvolableSequence<Etiquette: View>: View {
+private struct HoverableSequenceButton<Label: View>: View {
     let action: () -> Void
-    @ViewBuilder let etiquette: (Bool) -> Etiquette
-    @State private var estSurvole = false
+    @ViewBuilder let label: (Bool) -> Label
+    @State private var isHovered = false
 
     var body: some View {
-        Button(action: action) { etiquette(estSurvole) }
+        Button(action: action) { label(isHovered) }
             .buttonStyle(.plain)
-            .onHover { estSurvole = $0 }
+            .onHover { isHovered = $0 }
     }
 }
 
-// MARK: - Bouton épinglage du panneau (garde la fenêtre ouverte au changement de focus)
+// MARK: - Panel pin button (keeps the window open on focus change)
 
-private struct BoutonEpinglagePanneau: View {
-    @Binding var estEpingle: Bool
-    @State private var estSurvole = false
-    @State private var estPresse  = false
-    @State private var rotation: Double = 0
-    @State private var scale: CGFloat = 1
+private struct PanelPinButton: View {
+    @Binding var isPinned: Bool
+    @State private var isHovered  = false
+    @State private var isPressed  = false
+    @State private var rotation:  Double = 0
+    @State private var scale:     CGFloat = 1
 
     var body: some View {
         Button {
-            let epinglageVers = !estEpingle
-            // Animation : rotation + rebond à l'épinglage, retour doux au désépinglage
-            if epinglageVers {
+            let pinning = !isPinned
+            // Animation: rotation + bounce when pinning, smooth return when unpinning
+            if pinning {
                 withAnimation(.interpolatingSpring(stiffness: 280, damping: 14)) {
                     rotation = 45
-                    scale = 1.25
+                    scale    = 1.25
                 }
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.18) {
                     withAnimation(.spring(response: 0.28, dampingFraction: 0.55)) {
@@ -2105,7 +2101,7 @@ private struct BoutonEpinglagePanneau: View {
             } else {
                 withAnimation(.spring(response: 0.22, dampingFraction: 0.75)) {
                     rotation = 0
-                    scale = 0.85
+                    scale    = 0.85
                 }
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.12) {
                     withAnimation(.spring(response: 0.2, dampingFraction: 0.6)) {
@@ -2114,153 +2110,152 @@ private struct BoutonEpinglagePanneau: View {
                 }
             }
             withAnimation(.spring(response: 0.25, dampingFraction: 0.80)) {
-                estEpingle = epinglageVers
+                isPinned = pinning
             }
-            withAnimation(.spring(response: 0.22, dampingFraction: 0.65)) { estPresse = true }
+            withAnimation(.spring(response: 0.22, dampingFraction: 0.65)) { isPressed = true }
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-                withAnimation(.spring(response: 0.28, dampingFraction: 0.75)) { estPresse = false }
+                withAnimation(.spring(response: 0.28, dampingFraction: 0.75)) { isPressed = false }
             }
         } label: {
-            Image(systemName: estEpingle ? "pin.fill" : "pin")
+            Image(systemName: isPinned ? "pin.fill" : "pin")
                 .font(.system(size: 11, weight: .semibold))
-                .foregroundStyle(estEpingle ? Color.accentColor : (estSurvole ? Color.accentColor : Color.secondary))
+                .foregroundStyle(isPinned ? Color.accentColor : (isHovered ? Color.accentColor : Color.secondary))
                 .rotationEffect(.degrees(rotation))
                 .scaleEffect(scale)
                 .frame(width: 30, height: 30)
                 .background(
-                    Circle().fill(estEpingle
+                    Circle().fill(isPinned
                         ? Color.accentColor.opacity(0.15)
-                        : (estSurvole ? Color.accentColor.opacity(0.12) : Color.primary.opacity(0.06)))
+                        : (isHovered ? Color.accentColor.opacity(0.12) : Color.primary.opacity(0.06)))
                 )
-                .animation(.spring(response: 0.28, dampingFraction: 0.78), value: estSurvole)
-
+                .animation(.spring(response: 0.28, dampingFraction: 0.78), value: isHovered)
                 .animation(.interpolatingSpring(stiffness: 280, damping: 14), value: scale)
         }
         .buttonStyle(.plain)
-        .help(estEpingle
+        .help(isPinned
               ? S("Désépingler la fenêtre", "Unpin window")
               : S("Épingler la fenêtre (reste ouverte au changement d'app)", "Pin window (stays open when switching apps)"))
-        .onHover { estSurvole = $0 }
+        .onHover { isHovered = $0 }
     }
 }
 
-// MARK: - Bouton copies multiples
+// MARK: - Multi-paste button
 
-private struct BoutonFileCollage: View {
-    @Binding var estActif: Bool
-    @State private var estSurvole = false
+private struct MultiPasteButton: View {
+    @Binding var isActive: Bool
+    @State private var isHovered = false
 
     var body: some View {
         Button {
-            withAnimation(.spring(response: 0.3, dampingFraction: 0.78)) { estActif = true }
+            withAnimation(.spring(response: 0.3, dampingFraction: 0.78)) { isActive = true }
         } label: {
             HStack(spacing: 5) {
                 Image(systemName: "list.number").font(.system(size: 10, weight: .medium))
-                Text(L.copiesMultiples).font(.system(size: 10, weight: .medium)).lineLimit(1)
+                Text(L.multiPaste).font(.system(size: 10, weight: .medium)).lineLimit(1)
             }
-            .foregroundStyle(estSurvole ? .primary : .secondary)
+            .foregroundStyle(isHovered ? .primary : .secondary)
             .frame(maxWidth: .infinity)
             .padding(.vertical, 10)
             .background(
-                estSurvole ? Color.primary.opacity(0.08) : Color.primary.opacity(0.05),
+                isHovered ? Color.primary.opacity(0.08) : Color.primary.opacity(0.05),
                 in: RoundedRectangle(cornerRadius: 20)
             )
         }
         .buttonStyle(.plain)
         .frame(maxWidth: .infinity)
-        .onHover { estSurvole = $0 }
+        .onHover { isHovered = $0 }
     }
 }
 
-// MARK: - Barre de séquence inférieure
+// MARK: - Sequence bar
 
-private struct BarreSequence: View {
-    @ObservedObject var moniteur: MoniteurPressePapier
-    let fermer: () -> Void
-    @Binding var estActif: Bool
-    @Binding var file: [ElementPressePapier]
-    var masquerPourPipette: (() -> Void)? = nil
-    var rouvrirApresPipette: (() -> Void)? = nil
-    var masquerPourSequence: (() -> Void)? = nil
-    var rouvrirApresSequence: (() -> Void)? = nil
-    @State private var panneauMasquePourSequence: Bool = false
+private struct SequenceBar: View {
+    @ObservedObject var monitor: ClipboardMonitor
+    let close: () -> Void
+    @Binding var isActive: Bool
+    @Binding var queue: [ClipboardItem]
+    var hideForPicker: (() -> Void)? = nil
+    var reopenAfterPicker: (() -> Void)? = nil
+    var hideForSequence: (() -> Void)? = nil
+    var reopenAfterSequence: (() -> Void)? = nil
+    @State private var panelHiddenForSequence: Bool = false
 
-    private var estEnAttente: Bool   { moniteur.estSequenceActive }
-    private var indexCourant: Int    { moniteur.progressionSequence.actuel }
-    private var total: Int           { moniteur.fileSequence.count }
+    private var isPending:    Bool { monitor.isSequenceActive }
+    private var currentIndex: Int  { monitor.sequenceProgress.current }
+    private var total:        Int  { monitor.sequenceQueue.count }
 
     var body: some View {
         Group {
-            if estActif || estEnAttente {
+            if isActive || isPending {
                 HStack(spacing: 8) {
                     Circle()
-                        .fill(estEnAttente ? Color.orange : Color.accentAttenuation)
+                        .fill(isPending ? Color.orange : Color.accentAttenuation)
                         .frame(width: 6, height: 6)
 
-                    if estEnAttente {
+                    if isPending {
                         HStack(spacing: 4) {
-                            ForEach(Array(moniteur.fileSequence.enumerated()), id: \.element.id) { idx, _ in
+                            ForEach(Array(monitor.sequenceQueue.enumerated()), id: \.element.id) { idx, _ in
                                 RoundedRectangle(cornerRadius: 3)
                                     .fill(
-                                        idx < indexCourant  ? Color.green.opacity(0.7) :
-                                        idx == indexCourant ? Color.accentAttenuation :
+                                        idx < currentIndex  ? Color.green.opacity(0.7) :
+                                        idx == currentIndex ? Color.accentAttenuation :
                                                               Color.primary.opacity(0.15)
                                     )
-                                    .frame(width: idx == indexCourant ? 18 : 10, height: 6)
-                                    .animation(.spring(response: 0.28, dampingFraction: 0.78), value: indexCourant)
+                                    .frame(width: idx == currentIndex ? 18 : 10, height: 6)
+                                    .animation(.spring(response: 0.28, dampingFraction: 0.78), value: currentIndex)
                             }
                         }
-                        Text("\u{2318}V  \(indexCourant)/\(total)")
+                        Text("\u{2318}V  \(currentIndex)/\(total)")
                             .font(.system(size: 10, weight: .medium)).foregroundStyle(.orange)
                         Spacer()
-                        Button(action: annuler) {
-                            Text(L.annuler)
+                        Button(action: cancel) {
+                            Text(L.cancel)
                                 .font(.system(size: 10, weight: .medium)).foregroundStyle(.secondary)
                                 .padding(.horizontal, 8).padding(.vertical, 3)
                                 .background(Color.primary.opacity(0.07), in: RoundedRectangle(cornerRadius: 20))
                         }
                         .buttonStyle(.plain)
                     } else {
-                        Text(file.isEmpty ? L.appuyerAjouter : L.nbElements(file.count))
+                        Text(queue.isEmpty ? L.tapToAdd : L.itemCount(queue.count))
                             .font(.system(size: 10, weight: .medium))
-                            .foregroundStyle(file.isEmpty ? .secondary : .primary)
+                            .foregroundStyle(queue.isEmpty ? .secondary : .primary)
                             .lineLimit(1)
                         Spacer()
-                        if !file.isEmpty {
-                            BoutonSurvolableSequence {
-                                file = []
-                            } etiquette: { survole in
+                        if !queue.isEmpty {
+                            HoverableSequenceButton {
+                                queue = []
+                            } label: { hovered in
                                 Image(systemName: "arrow.counterclockwise")
                                     .font(.system(size: 10, weight: .medium))
-                                    .foregroundStyle(survole ? .primary : .secondary)
+                                    .foregroundStyle(hovered ? .primary : .secondary)
                                     .frame(width: 24, height: 24)
                                     .background(
-                                        survole ? Color.primary.opacity(0.13) : Color.primary.opacity(0.07),
+                                        hovered ? Color.primary.opacity(0.13) : Color.primary.opacity(0.07),
                                         in: RoundedRectangle(cornerRadius: 8)
                                     )
                             }
                             .fixedSize()
-                            BoutonSurvolableSequence(action: demarrer) { survole in
+                            HoverableSequenceButton(action: start) { hovered in
                                 HStack(spacing: 3) {
                                     Image(systemName: "play.fill").font(.system(size: 9))
-                                    Text(L.demarrer).font(.system(size: 10, weight: .semibold)).lineLimit(1)
+                                    Text(L.start).font(.system(size: 10, weight: .semibold)).lineLimit(1)
                                 }
                                 .foregroundStyle(.white)
                                 .padding(.horizontal, 9).padding(.vertical, 4)
                                 .background(
-                                    survole ? Color.accentAttenuation.opacity(0.75) : Color.accentAttenuation,
+                                    hovered ? Color.accentAttenuation.opacity(0.75) : Color.accentAttenuation,
                                     in: RoundedRectangle(cornerRadius: 20)
                                 )
                             }
                             .fixedSize()
                         }
-                        BoutonSurvolableSequence(action: annuler) { survole in
+                        HoverableSequenceButton(action: cancel) { hovered in
                             Image(systemName: "xmark")
                                 .font(.system(size: 9, weight: .bold))
-                                .foregroundStyle(survole ? .primary : .secondary)
+                                .foregroundStyle(hovered ? .primary : .secondary)
                                 .frame(width: 18, height: 18)
                                 .background(
-                                    survole ? Color.primary.opacity(0.13) : Color.primary.opacity(0.07),
+                                    hovered ? Color.primary.opacity(0.13) : Color.primary.opacity(0.07),
                                     in: RoundedRectangle(cornerRadius: 8)
                                 )
                         }
@@ -2269,150 +2264,150 @@ private struct BarreSequence: View {
                 .padding(.horizontal, 12).padding(.vertical, 8)
                 .frame(maxWidth: .infinity, minHeight: 34, maxHeight: 34)
                 .background(
-                    estEnAttente ? Color.orange.opacity(0.08) : Color.accentAttenuation.opacity(0.20),
+                    isPending ? Color.orange.opacity(0.08) : Color.accentAttenuation.opacity(0.20),
                     in: RoundedRectangle(cornerRadius: 20)
                 )
                 .transition(.move(edge: .bottom).combined(with: .opacity))
             } else {
                 HStack(spacing: 8) {
-                    BoutonFileCollage(estActif: $estActif)
+                    MultiPasteButton(isActive: $isActive)
 
-                    BoutonPipette(moniteur: moniteur, fermer: fermer, masquerPourPipette: masquerPourPipette, rouvrirApresPipette: rouvrirApresPipette).frame(maxWidth: .infinity)
+                    ColorPickerButton(monitor: monitor, close: close, hideForPicker: hideForPicker, reopenAfterPicker: reopenAfterPicker).frame(maxWidth: .infinity)
                 }
                 .transition(.move(edge: .bottom).combined(with: .opacity))
             }
         }
-        .animation(.spring(response: 0.3, dampingFraction: 0.82), value: estActif)
-        .animation(.spring(response: 0.3, dampingFraction: 0.82), value: estEnAttente)
-        .onChange(of: moniteur.estSequenceActive) { _, actif in
-            // La séquence vient de se terminer et on avait masqué le panneau → le rouvrir
-            if !actif, panneauMasquePourSequence {
-                panneauMasquePourSequence = false
-                file = []
-                estActif = false
-                rouvrirApresSequence?()
+        .animation(.spring(response: 0.3, dampingFraction: 0.82), value: isActive)
+        .animation(.spring(response: 0.3, dampingFraction: 0.82), value: isPending)
+        .onChange(of: monitor.isSequenceActive) { _, active in
+            // Sequence just ended and the panel was hidden → reopen it
+            if !active, panelHiddenForSequence {
+                panelHiddenForSequence = false
+                queue    = []
+                isActive = false
+                reopenAfterSequence?()
             }
         }
     }
 
-    private func demarrer() {
-        guard !file.isEmpty else { return }
-        moniteur.demarrerSequence(elements: file)
-        if let masquer = masquerPourSequence {
-            // Panneau épinglé : masquer sans détruire, sera rouvert à la fin
-            masquer()
-            panneauMasquePourSequence = true
+    private func start() {
+        guard !queue.isEmpty else { return }
+        monitor.startSequence(items: queue)
+        if let _ = hideForSequence {
+            // Pinned panel: hide without destroying, will be reopened when done
+            hideForSequence!()
+            panelHiddenForSequence = true
         } else {
-            fermer()
+            close()
         }
     }
 
-    private func annuler() {
-        moniteur.annulerSequence()
-        file = []
-        estActif = false
+    private func cancel() {
+        monitor.cancelSequence()
+        queue    = []
+        isActive = false
     }
 }
 
-// MARK: - Panneau principal
+// MARK: - Main panel
 
-struct PanneauPressePapier: View {
-    @ObservedObject var moniteur: MoniteurPressePapier
-    let fermer: () -> Void
-    /// Passé uniquement par le NSPanel — absent du panel widget SDK
-    var epingleBinding: Binding<Bool>? = nil
-    /// Masque le panneau sans le détruire (pour la pipette quand épinglé)
-    var masquerPourPipette: (() -> Void)? = nil
-    /// Callback pour rouvrir le panneau après la pipette si épinglé
-    var rouvrirApresPipette: (() -> Void)? = nil
-    /// Masque le panneau sans le détruire (pour la séquence quand épinglé)
-    var masquerPourSequence: (() -> Void)? = nil
-    /// Callback pour rouvrir le panneau après la séquence si épinglé
-    var rouvrirApresSequence: (() -> Void)? = nil
+struct ClipboardPanel: View {
+    @ObservedObject var monitor: ClipboardMonitor
+    let close: () -> Void
+    /// Passed only by the NSPanel — absent from the widget SDK panel
+    var pinBinding: Binding<Bool>? = nil
+    /// Hides the panel without destroying it (for the color picker when pinned)
+    var hideForPicker: (() -> Void)? = nil
+    /// Callback to reopen the panel after the color picker if pinned
+    var reopenAfterPicker: (() -> Void)? = nil
+    /// Hides the panel without destroying it (for the sequence when pinned)
+    var hideForSequence: (() -> Void)? = nil
+    /// Callback to reopen the panel after the sequence if pinned
+    var reopenAfterSequence: (() -> Void)? = nil
 
-    private var afficherBoutonEpingle: Bool { epingleBinding != nil }
+    private var showPinButton: Bool { pinBinding != nil }
 
-    @State private var selectionne: ElementPressePapier? = nil
-    @State private var filtreActif: FiltrePressePapier = .tout
-    @State private var afficherPanneauSequence: Bool = false
-    @State private var fileSequence: [ElementPressePapier] = []
-    @State private var rechercheActive: Bool = false
-    @State private var texteRecherche: String = ""
+    @State private var selected:          ClipboardItem? = nil
+    @State private var activeFilter:      ClipboardFilter = .all
+    @State private var showSequencePanel: Bool = false
+    @State private var sequenceQueue:     [ClipboardItem] = []
+    @State private var searchActive:      Bool = false
+    @State private var searchText:        String = ""
 
-    private var elementsFiltres: [ElementPressePapier] {
-        let base: [ElementPressePapier]
-        switch filtreActif {
-        case .tout:    base = moniteur.elements
-        case .medias:  base = moniteur.elements.filter {
-            if case .image = $0.contenu { return true }
-            if case .urlFichier(let url) = $0.contenu {
+    private var filteredItems: [ClipboardItem] {
+        let base: [ClipboardItem]
+        switch activeFilter {
+        case .all:   base = monitor.items
+        case .media: base = monitor.items.filter {
+            if case .image = $0.content { return true }
+            if case .fileURL(let url) = $0.content {
                 let ext = url.pathExtension.lowercased()
-                let extensionsMedia: Set<String> = [
+                let mediaExtensions: Set<String> = [
                     "jpg","jpeg","png","gif","webp","svg","tiff","tif","bmp","heic","heif",
                     "mp4","mov","avi","mkv","m4v","wmv","webm",
                     "pdf","docx","doc","xlsx","xls","pptx","ppt","pages","numbers","key","odt"
                 ]
-                return extensionsMedia.contains(ext)
+                return mediaExtensions.contains(ext)
             }
             return false
         }
-        case .donnees: base = moniteur.elements.filter {
-            if case .texte = $0.contenu {
-                let st = $0.sousTypeCache
-                return st == .email || st == .telephone || st == .date || st == .url
+        case .data: base = monitor.items.filter {
+            if case .text = $0.content {
+                let subtype = $0.cachedSubtype
+                return subtype == .email || subtype == .phone || subtype == .date || subtype == .url
             }
             return false
         }
         }
-        // Appliquer la recherche textuelle par-dessus le filtre actif
-        let q = texteRecherche.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        guard !q.isEmpty else { return base }
-        return base.filter { $0.titreAffiche.lowercased().contains(q) }
+        // Apply text search on top of the active filter
+        let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !query.isEmpty else { return base }
+        return base.filter { $0.displayTitle.lowercased().contains(query) }
     }
 
-    private var elementsEpingles:    [ElementPressePapier] { elementsFiltres.filter { $0.estEpingle } }
-    private var elementsNonEpingles: [ElementPressePapier] { elementsFiltres.filter { !$0.estEpingle } }
+    private var pinnedItems:   [ClipboardItem] { filteredItems.filter { $0.isPinned } }
+    private var unpinnedItems: [ClipboardItem] { filteredItems.filter { !$0.isPinned } }
 
     var body: some View {
         ZStack(alignment: .leading) {
             Group {
-                // Correctif : toujours lire l'élément depuis moniteur.elements pour que estEpingle et les autres
-                // changements d'état soient reflétés immédiatement (évite la copie de struct périmée).
-                if let element = (selectionne.flatMap { s in moniteur.elements.first(where: { $0.id == s.id }) })
-                                ?? moniteur.elements.first { panneauApercu(element).id(element.id) }
-                else { apercuVide }
+                // Fix: always read the item from monitor.items so that isPinned and other
+                // state changes are immediately reflected (avoids stale struct copy).
+                if let element = (selected.flatMap { s in monitor.items.first(where: { $0.id == s.id }) })
+                                ?? monitor.items.first { previewPanel(element).id(element.id) }
+                else { emptyPreview }
             }
             .padding(.leading, 304)
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
 
             VStack(spacing: 0) {
                 HStack(spacing: 6) {
-                    if rechercheActive {
-                        // ── Mode recherche : champ texte remplace les filtres ──
-                        ChampRechercheInline(texte: $texteRecherche, actif: $rechercheActive)
+                    if searchActive {
+                        // ── Search mode: text field replaces the filters ──
+                        InlineSearchField(text: $searchText, isActive: $searchActive)
                             .transition(.asymmetric(
                                 insertion: .scale(scale: 0.85, anchor: .leading).combined(with: .opacity),
                                 removal:   .scale(scale: 0.85, anchor: .leading).combined(with: .opacity)
                             ))
                     } else {
-                        // ── Mode normal : filtres + bouton recherche ───────────
-                        ControleFiltreSegmente(filtres: FiltrePressePapier.allCases, filtreActif: $filtreActif, iconesSeulement: afficherBoutonEpingle)
+                        // ── Normal mode: filters + search button ───────────
+                        SegmentedFilterControl(filters: ClipboardFilter.allCases, activeFilter: $activeFilter, iconsOnly: showPinButton)
                             .transition(.asymmetric(
                                 insertion: .scale(scale: 0.85, anchor: .trailing).combined(with: .opacity),
                                 removal:   .scale(scale: 0.85, anchor: .trailing).combined(with: .opacity)
                             ))
-                        BoutonRecherche {
+                        SearchButton {
                             withAnimation(.spring(response: 0.32, dampingFraction: 0.78)) {
-                                rechercheActive = true
+                                searchActive = true
                             }
                         }
                         .transition(.scale.combined(with: .opacity))
                     }
-                    if let binding = epingleBinding {
-                        BoutonEpinglagePanneau(estEpingle: binding)
+                    if let binding = pinBinding {
+                        PanelPinButton(isPinned: binding)
                     }
-                    BoutonReinitialisation {
-                        withAnimation(.spring(response: 0.28, dampingFraction: 0.82)) { moniteur.toutEffacer(); selectionne = nil }
+                    ResetButton {
+                        withAnimation(.spring(response: 0.28, dampingFraction: 0.82)) { monitor.clearAll(); selected = nil }
                     }
                 }
                 .fixedSize(horizontal: false, vertical: true)
@@ -2420,26 +2415,26 @@ struct PanneauPressePapier: View {
 
                 ScrollView(.vertical, showsIndicators: false) {
                     LazyVStack(spacing: 7) {
-                        if !elementsEpingles.isEmpty {
-                            etiquetteSection(L.epingles)
-                            ForEach(elementsEpingles) { element in
-                                ligneElement(element)
-                                    .id(element.id.uuidString + "\(element.estEpingle)")
+                        if !pinnedItems.isEmpty {
+                            sectionLabel(L.pinned)
+                            ForEach(pinnedItems) { element in
+                                itemRow(element)
+                                    .id(element.id.uuidString + "\(element.isPinned)")
                                     .transition(.opacity)
                             }
                         }
-                        if !elementsNonEpingles.isEmpty {
-                            if !elementsEpingles.isEmpty { etiquetteSection(L.recents) }
-                            ForEach(elementsNonEpingles) { element in
-                                ligneElement(element)
-                                    .id(element.id.uuidString + "\(element.estEpingle)")
+                        if !unpinnedItems.isEmpty {
+                            if !pinnedItems.isEmpty { sectionLabel(L.recent) }
+                            ForEach(unpinnedItems) { element in
+                                itemRow(element)
+                                    .id(element.id.uuidString + "\(element.isPinned)")
                                     .transition(.opacity)
                             }
                         }
-                        if elementsFiltres.isEmpty { vueEtatVide }
+                        if filteredItems.isEmpty { emptyStateView }
                         Spacer().frame(height: 12)
                     }
-                    .animation(.easeInOut(duration: 0.18), value: filtreActif)
+                    .animation(.easeInOut(duration: 0.18), value: activeFilter)
                     .padding(.horizontal, 8).padding(.top, 10).padding(.bottom, 10)
                 }
                 .overlay(alignment: .top) {
@@ -2456,9 +2451,9 @@ struct PanneauPressePapier: View {
                 }
                 .compositingGroup()
 
-                BarreSequence(moniteur: moniteur, fermer: fermer, estActif: $afficherPanneauSequence, file: $fileSequence,
-                              masquerPourPipette: masquerPourPipette, rouvrirApresPipette: rouvrirApresPipette,
-                              masquerPourSequence: masquerPourSequence, rouvrirApresSequence: rouvrirApresSequence)
+                SequenceBar(monitor: monitor, close: close, isActive: $showSequencePanel, queue: $sequenceQueue,
+                              hideForPicker: hideForPicker, reopenAfterPicker: reopenAfterPicker,
+                              hideForSequence: hideForSequence, reopenAfterSequence: reopenAfterSequence)
                     .padding(.horizontal, 10).padding(.bottom, 10)
             }
             .frame(width: 277).frame(maxHeight: .infinity)
@@ -2474,83 +2469,83 @@ struct PanneauPressePapier: View {
         .frame(width: 765, height: 500)
         .background(.regularMaterial)
         .clipShape(RoundedRectangle(cornerRadius: 26))
-        .onAppear { selectionne = moniteur.elements.first(where: { !$0.estEpingle }) ?? moniteur.elements.first }
+        .onAppear { selected = monitor.items.first(where: { !$0.isPinned }) ?? monitor.items.first }
     }
 
     @State private var doubleTapID: UUID? = nil
 
-    private func ligneElement(_ element: ElementPressePapier) -> some View {
-        let idxSeq = fileSequence.firstIndex(where: { $0.id == element.id })
-        let estDejaSelectionne = !afficherPanneauSequence && selectionne?.id == element.id
+    private func itemRow(_ element: ClipboardItem) -> some View {
+        let sequenceIdx     = sequenceQueue.firstIndex(where: { $0.id == element.id })
+        let alreadySelected = !showSequencePanel && selected?.id == element.id
 
-        return LigneElementPressePapier(
+        return ClipboardItemRow(
             element: element,
-            estSelectionne: estDejaSelectionne,
-            indexSequence: afficherPanneauSequence ? idxSeq.map { $0 + 1 } : nil,
-            chargerMiniature: true,
-            surTap: {
-                if afficherPanneauSequence {
-                    if fileSequence.contains(where: { $0.id == element.id }) {
-                        fileSequence.removeAll { $0.id == element.id }
+            isSelected: alreadySelected,
+            sequenceIndex: showSequencePanel ? sequenceIdx.map { $0 + 1 } : nil,
+            loadThumbnail: true,
+            onTap: {
+                if showSequencePanel {
+                    if sequenceQueue.contains(where: { $0.id == element.id }) {
+                        sequenceQueue.removeAll { $0.id == element.id }
                     } else {
-                        fileSequence.append(element)
+                        sequenceQueue.append(element)
                     }
                 } else {
-                    // Si le double-tap vient de marquer cet élément, coller une seule fois
+                    // If the double-tap just flagged this item, paste only once
                     if doubleTapID == element.id {
                         doubleTapID = nil
-                        moniteur.coller(element: element); fermer()
-                    } else if estDejaSelectionne {
-                        moniteur.coller(element: element); fermer()
+                        monitor.paste(item: element); close()
+                    } else if alreadySelected {
+                        monitor.paste(item: element); close()
                     } else {
-                        selectionne = element
+                        selected = element
                     }
                 }
             },
-            surDoubleTap: {
-                guard !afficherPanneauSequence else { return }
-                // Marquer l'élément pour que surTap (qui arrive juste après) colle une seule fois
+            onDoubleTap: {
+                guard !showSequencePanel else { return }
+                // Flag the item so onTap (which fires right after) pastes only once
                 doubleTapID = element.id
-                selectionne = element
+                selected    = element
             }
         )
     }
 
-    private func etiquetteSection(_ texte: String) -> some View {
+    private func sectionLabel(_ text: String) -> some View {
         HStack {
-            if texte == L.epingles {
+            if text == L.pinned {
                 Image(systemName: "pin.fill").font(.system(size: 9)).foregroundStyle(Color.accentColor)
             }
-            Text(texte).font(.system(size: 10, weight: .semibold)).foregroundStyle(.secondary).textCase(.uppercase)
+            Text(text).font(.system(size: 10, weight: .semibold)).foregroundStyle(.secondary).textCase(.uppercase)
             Spacer()
         }
         .padding(.horizontal, 10).padding(.top, 6).padding(.bottom, 2)
     }
 
-    private func panneauApercu(_ element: ElementPressePapier) -> some View {
-        // Structure : VStack en 3 blocs dans un conteneur 500px de haut
+    private func previewPanel(_ element: ClipboardItem) -> some View {
+        // Layout: VStack in 3 blocks inside a 500 px tall container
         //
         // ┌─────────────────────────────────────────┐
-        // │  BLOC 1 : zoneApercu                    │  ← maxHeight: .infinity
-        // │  (image / texte / fichier)              │
+        // │  BLOCK 1 : previewArea                   │  ← maxHeight: .infinity
+        // │  (image / text / file)                   │
         // ├─────────────────────────────────────────┤
-        // │  BLOC 2 : ligneInfos                    │  ← hauteur fixe naturelle
-        // │  [icône app + nom]  [dimensions]  [date]│
+        // │  BLOCK 2 : infoRow                       │  ← natural fixed height
+        // │  [app icon + name]  [dimensions]  [date] │
         // ├─────────────────────────────────────────┤
-        // │  BLOC 3 : ligneBoutons                  │  ← hauteur fixe naturelle
-        // │  [Coller] [Copier] [💾] [📌] [🗑]       │
+        // │  BLOCK 3 : buttonRow                     │  ← natural fixed height
+        // │  [Paste] [Copy] [💾] [📌] [🗑]           │
         // └─────────────────────────────────────────┘
 
-        let zoneApercu = ZStack {
+        let previewArea = ZStack {
             RoundedRectangle(cornerRadius: 26)
                 .fill(Color.secondary.opacity(0.10))
-            contenuApercu(pour: element)
+            previewContent(for: element)
                 .id(element.id)
                 .transition(.move(edge: .bottom).combined(with: .opacity))
                 .animation(.spring(response: 0.32, dampingFraction: 0.82), value: element.id)
         }
 
-        let ligneInfos = HStack(alignment: .center) {
+        let infoRow = HStack(alignment: .center) {
             HStack(spacing: 5) {
                 Text(element.source)
                     .font(.system(size: 11))
@@ -2559,66 +2554,66 @@ struct PanneauPressePapier: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
 
-            Text(DateFormatter.datePleine.string(from: element.date))
+            Text(DateFormatter.fullDate.string(from: element.date))
                 .font(.system(size: 11))
                 .foregroundStyle(.secondary)
                 .frame(maxWidth: .infinity, alignment: .trailing)
         }
 
-        let ligneBoutons = HStack(spacing: 10) {
-            BoutonActionAnime(titre: L.collerTitre, icone: "arrow.down.doc", texteAide: L.collerAide, pleineLargeur: true) {
-                moniteur.coller(element: element); fermer()
+        let buttonRow = HStack(spacing: 10) {
+            AnimatedActionButton(title: L.pasteTitle, icon: "arrow.down.doc", helpText: L.pasteHint, fullWidth: true) {
+                monitor.paste(item: element); close()
             }
-            BoutonActionAnime(titre: L.copierTitre, icone: "doc.on.doc", texteAide: L.copierAide, pleineLargeur: true) {
-                moniteur.copierVersPressePapier(element: element)
+            AnimatedActionButton(title: L.copyTitle, icon: "doc.on.doc", helpText: L.copyHint, fullWidth: true) {
+                monitor.copyToClipboard(item: element)
             }
-            if case .image(let img) = element.contenu { BoutonSauvegardeImage(image: img) }
-            if case .urlFichier(let url) = element.contenu { BoutonSauvegardeFichier(url: url) }
-            if case .texte(let t) = element.contenu, (t.hasPrefix("http") || t.hasPrefix("www")), let url = URL(string: t) {
-                BoutonIconeSurvol(symbole: "globe.americas.fill", couleur: .secondary, texteAide: L.ouvrirNavig) {
+            if case .image(let img) = element.content { SaveImageButton(image: img) }
+            if case .fileURL(let url) = element.content { SaveFileButton(url: url) }
+            if case .text(let t) = element.content, (t.hasPrefix("http") || t.hasPrefix("www")), let url = URL(string: t) {
+                HoverIconButton(symbol: "globe.americas.fill", color: .secondary, helpText: L.openInBrowser) {
                     NSWorkspace.shared.open(url)
                 }
             }
-            BoutonEpingleElement(estEpingle: element.estEpingle) {
+            ItemPinButton(isPinned: element.isPinned) {
                 withAnimation(.spring(response: 0.28, dampingFraction: 0.78)) {
-                    moniteur.basculerEpingle(element: element)
-                    if selectionne?.id == element.id {
-                        selectionne = moniteur.elements.first(where: { $0.id == element.id })
+                    monitor.togglePin(item: element)
+                    if selected?.id == element.id {
+                        selected = monitor.items.first(where: { $0.id == element.id })
                     }
                 }
             }
-            BoutonIconeSurvol(symbole: "trash", couleur: .red, texteAide: L.supprimer) {
+            HoverIconButton(symbol: "trash", color: .red, helpText: L.deleteItem) {
                 withAnimation(.spring(response: 0.28, dampingFraction: 0.82)) {
-                    if selectionne?.id == element.id {
-                        // Trouver l'élément suivant dans la liste filtrée avant suppression
-                        let liste = elementsFiltres
-                        if let idx = liste.firstIndex(where: { $0.id == element.id }) {
-                            if idx + 1 < liste.count {
-                                selectionne = liste[idx + 1]   // élément juste en dessous
+                    if selected?.id == element.id {
+                        // Find the next item in the filtered list before deletion
+                        let list = filteredItems
+                        if let idx = list.firstIndex(where: { $0.id == element.id }) {
+                            if idx + 1 < list.count {
+                                selected = list[idx + 1]   // item just below
                             } else if idx > 0 {
-                                selectionne = liste[idx - 1]   // dernier de la liste → on remonte
+                                selected = list[idx - 1]   // last of list → go up
                             } else {
-                                selectionne = nil              // liste vide après suppression
+                                selected = nil              // list empty after deletion
                             }
                         }
                     }
-                    moniteur.supprimer(element: element)
+                    monitor.delete(item: element)
                 }
             }
         }
 
         return VStack(spacing: 0) {
-            zoneApercu
+            previewArea
                 .padding(.horizontal, 12)
                 .padding(.top, 0)
                 .padding(.bottom, 8)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
 
-            ligneInfos
+            infoRow
                 .padding(.horizontal, 16)
                 .padding(.vertical, 10)
 
-            ligneBoutons
+            buttonRow
                 .padding(.horizontal, 16)
                 .padding(.bottom, 20)
         }
@@ -2626,26 +2621,26 @@ struct PanneauPressePapier: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
     }
 
-    // OPTIMISATION 8 : @ViewBuilder — SwiftUI voit le type concret de chaque branche
-    // et peut diff efficacement sans passer par la boîte noire AnyView.
+    // OPTIMISATION 8: @ViewBuilder — SwiftUI sees the concrete type of each branch
+    // and can diff efficiently without going through the AnyView black box.
     @ViewBuilder
-    private func contenuApercu(pour element: ElementPressePapier) -> some View {
-        switch element.contenu {
+    private func previewContent(for element: ClipboardItem) -> some View {
+        switch element.content {
         case .image(let img):
             Image(nsImage: img)
                 .resizable()
                 .aspectRatio(contentMode: .fit)
                 .clipShape(RoundedRectangle(cornerRadius: 26))
                 .padding(16)
-        case .texte(let t):
-            // OPTIMISATION 9 : on utilise couleurCachee au lieu de recalculer la regex
-            if let couleur = element.couleurCachee {
+        case .text(let t):
+            // OPTIMISATION 9: use cachedColor instead of re-running the regex
+            if let color = element.cachedColor {
                 VStack(spacing: 16) {
                     RoundedRectangle(cornerRadius: 24)
-                        .fill(couleur)
+                        .fill(color)
                         .frame(width: 180, height: 180)
                         .overlay(RoundedRectangle(cornerRadius: 24).stroke(Color.primary.opacity(0.15), lineWidth: 1))
-                    VueEchantillonCouleur(couleur: couleur, etiquette: t.trimmingCharacters(in: .whitespacesAndNewlines))
+                    ColorSwatchView(color: color, label: t.trimmingCharacters(in: .whitespacesAndNewlines))
                 }
             } else {
                 ScrollView {
@@ -2656,108 +2651,108 @@ struct PanneauPressePapier: View {
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
             }
-        case .urlFichier(let url):
-            ApercuFichier(url: url).padding(12)
-        case .inconnu:
+        case .fileURL(let url):
+            FilePreview(url: url).padding(12)
+        case .unknown:
             Image(systemName: "questionmark.circle")
                 .font(.system(size: 40))
                 .foregroundStyle(.secondary)
         }
     }
 
-    private var apercuVide: some View {
+    private var emptyPreview: some View {
         VStack(spacing: 12) {
             Image(systemName: "clipboard.fill").font(.system(size: 40)).foregroundStyle(.tertiary)
-            Text(L.selectionnerElement).foregroundStyle(.secondary)
+            Text(L.selectItem).foregroundStyle(.secondary)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
-    private var vueEtatVide: some View {
+    private var emptyStateView: some View {
         VStack(spacing: 8) {
-            Image(systemName: filtreActif.icone).font(.system(size: 26)).foregroundStyle(.tertiary)
-            Text(L.videFiltre(filtre: filtreActif.etiquette)).foregroundStyle(.secondary).font(.caption)
+            Image(systemName: activeFilter.icon).font(.system(size: 26)).foregroundStyle(.tertiary)
+            Text(L.emptyFilter(filter: activeFilter.label)).foregroundStyle(.secondary).font(.caption)
         }
         .padding(.top, 40).frame(maxWidth: .infinity)
     }
 }
 
-// MARK: - Wrapper SDK : protège dismiss() contre la fermeture prématurée
+// MARK: - SDK Wrapper: protects dismiss() against premature closing
 //
-// Problème : DD Pro surveille la souris sur son widget et appelle dismiss()
-// dès qu'elle le quitte — même si elle se dirige vers notre panel popup.
-// Quand la souris bouge vite, le dismiss est déclenché avant que la souris
-// soit arrivée sur le panel, qui disparaît aussitôt.
+// Problem: DD Pro watches the mouse over its widget and calls dismiss()
+// as soon as it leaves — even if it's heading toward our popup panel.
+// When the mouse moves fast, the dismiss fires before the mouse has
+// reached the panel, which then disappears immediately.
 //
-// Solution : makePanelBody (ClipboardPlugin) enveloppe le dismiss DD Pro
-// dans un dismissProtege qui attend 200 ms et vérifie via NSEvent.mouseLocation
-// si la souris est dans le frame du panel. Si oui → fermeture annulée.
-// La fermeture explicite (bouton ✕, raccourci) passe par `fermer` directement.
+// Solution: makePanelBody (ClipboardPlugin) wraps the DD Pro dismiss
+// in a guardedDismiss that waits 200 ms and checks via NSEvent.mouseLocation
+// whether the mouse is inside the panel frame. If yes → close cancelled.
+// Explicit closes (✕ button, shortcut) go through `close` directly.
 
-// MARK: - Contexte partagé Plugin ↔ Sentinelle
+// MARK: - Shared Plugin context ↔ Sentinel
 
-/// Objet de liaison transmis par ClipboardPlugin à PanneauPressePapierSDK
-/// puis à SentinelleNSPanel. La sentinelle y dépose la fenêtre dès qu'elle
-/// est insérée dans la hiérarchie, ce qui permet au dismissProtege de connaître
-/// le frame du panel pour vérifier la position de la souris.
-final class ContexteFenetrePanelSDK: @unchecked Sendable {
-    weak var fenetre: NSWindow?
-    var workItemEnCours: DispatchWorkItem?
+/// Binding object transmitted by ClipboardPlugin to ClipboardPanelSDK
+/// and then to NSPanelSentinel. The sentinel deposits the window reference
+/// as soon as it is inserted in the hierarchy, allowing guardedDismiss to know
+/// the panel frame in order to check the mouse position.
+final class PanelWindowContext: @unchecked Sendable {
+    weak var window: NSWindow?
+    var pendingWorkItem: DispatchWorkItem?
 
-    func annulerFermetureProgrammee() {
-        workItemEnCours?.cancel()
-        workItemEnCours = nil
+    func cancelScheduledClose() {
+        pendingWorkItem?.cancel()
+        pendingWorkItem = nil
     }
 }
 
-struct PanneauPressePapierSDK: View {
-    let moniteur: MoniteurPressePapier
-    /// Fermeture explicite (bouton ✕, raccourci) — toujours honorée.
+struct ClipboardPanelSDK: View {
+    let monitor: ClipboardMonitor
+    /// Explicit close (✕ button, shortcut) — always honored.
     let dismiss: () -> Void
-    /// Fermeture avec délai de grâce — appelée par DD Pro quand la souris quitte le widget.
-    let dismissProtege: () -> Void
-    let contexte: ContexteFenetrePanelSDK
+    /// Delayed close with grace period — called by DD Pro when the mouse leaves the widget.
+    let guardedDismiss: () -> Void
+    let context: PanelWindowContext
 
     var body: some View {
-        PanneauPressePapier(
-            moniteur: moniteur,
-            fermer: dismiss
+        ClipboardPanel(
+            monitor: monitor,
+            close: dismiss
         )
-        .background(SentinelleNSPanel(contexte: contexte))
-        .onHover { dedans in
-            // Dès que la souris entre dans le panel, on annule la fermeture programmée.
-            if dedans { contexte.annulerFermetureProgrammee() }
+        .background(NSPanelSentinel(context: context))
+        .onHover { inside in
+            // As soon as the mouse enters the panel, cancel the scheduled close.
+            if inside { context.cancelScheduledClose() }
         }
     }
 }
 
-// MARK: - Sentinelle NSPanel
+// MARK: - NSPanel Sentinel
 
-/// NSView invisible dont le seul rôle est de déposer la référence à la
-/// NSWindow dans ContexteFenetrePanelSDK dès qu'elle est connue.
-private struct SentinelleNSPanel: NSViewRepresentable {
-    let contexte: ContexteFenetrePanelSDK
+/// Invisible NSView whose sole purpose is to deposit the NSWindow reference
+/// into PanelWindowContext as soon as it is known.
+private struct NSPanelSentinel: NSViewRepresentable {
+    let context: PanelWindowContext
 
-    func makeNSView(context: Context) -> VueSentinelle {
-        let vue = VueSentinelle(contexte: contexte)
-        vue.translatesAutoresizingMaskIntoConstraints = false
-        return vue
+    func makeNSView(context ctx: Context) -> SentinelView {
+        let view = SentinelView(context: context)
+        view.translatesAutoresizingMaskIntoConstraints = false
+        return view
     }
 
-    func updateNSView(_ vue: VueSentinelle, context: Context) {}
+    func updateNSView(_ view: SentinelView, context ctx: Context) {}
 
-    // NSView subclass : viewDidMoveToWindow est fiable dès l'insertion.
-    class VueSentinelle: NSView {
-        let contexte: ContexteFenetrePanelSDK
-        init(contexte: ContexteFenetrePanelSDK) {
-            self.contexte = contexte
+    // NSView subclass: viewDidMoveToWindow is reliable from insertion onwards.
+    class SentinelView: NSView {
+        let context: PanelWindowContext
+        init(context: PanelWindowContext) {
+            self.context = context
             super.init(frame: .zero)
         }
         required init?(coder: NSCoder) { fatalError() }
 
         override func viewDidMoveToWindow() {
             super.viewDidMoveToWindow()
-            contexte.fenetre = window
+            context.window = window
         }
     }
 }
